@@ -249,7 +249,7 @@ export class UsersService {
                 .addSelect(`COALESCE(SUM(CASE WHEN item."isCompleted" = TRUE THEN 1 ELSE 0 END), 0)`, 'tasksDone')
                 .where('user.role = :role', { role: UserRole.INTERN })
                 .groupBy('user.id, user.email, user.firstName, user.lastName, user.role')
-                .orderBy('user."lastName"', 'ASC')
+                .orderBy('user.lastName', 'ASC')
                 .getRawMany();
 
             return internsWithProgress.map((rawIntern: any) => {

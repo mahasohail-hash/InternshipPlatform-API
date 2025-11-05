@@ -27,9 +27,12 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   handleRequest(err: any, user: any, info: any) {
     // You can throw an exception based on error or user
     if (err || !user) {
-      // console.log('[JwtAuthGuard] Authentication failed:', err || info); // Debugging
+      console.error('[JwtAuthGuard] Authentication failed:', err || info);
+      console.error('[JwtAuthGuard] Error details:', err);
+      console.error('[JwtAuthGuard] Info details:', info);
       throw err || new UnauthorizedException('Authentication failed. Invalid or missing token.');
     }
+    console.log('[JwtAuthGuard] Authentication successful. User attached:', { id: user?.id, email: user?.email, role: user?.role });
     return user;
   }
 }

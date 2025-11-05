@@ -54,10 +54,11 @@ export class EvaluationsController {
   }
     // 4. POST /api/evaluations/draft-review/:internId - Generate AI Draft (4.7)
     @Post('draft-review/:internId')
-    @Roles(UserRole.MENTOR)
+    @Roles(UserRole.MENTOR, UserRole.HR)
     async generateReviewDraft(@Param('internId', ParseUUIDPipe) internId: string, @Req() req: RequestWithUser) {
-        const mentorId = req.user.id;
+        const userId = req.user.id;
         // The service will handle verifying if this mentor is assigned to the intern's project etc.
-        return this.evaluationsService.generateAiDraft(internId, mentorId);
+        // HR can also generate draft reviews for administrative purposes
+        return this.evaluationsService.generateAiDraft(internId, userId);
     }
 }

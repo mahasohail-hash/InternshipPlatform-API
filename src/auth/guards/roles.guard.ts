@@ -21,23 +21,28 @@ if (!requiredRoles || requiredRoles.length === 0) {
 
 // Get the user from the request (attached by JwtAuthGuard)
   const { user, url, method } = context.switchToHttp().getRequest<RequestWithUser>();
-   this.logger.debug(`[${method} ${url}] Checking roles for user: ${user?.email || 'N/A'}`);
-    this.logger.debug(`[${method} ${url}] User role in JWT: ${user?.role || 'N/A'}`);
-    this.logger.debug(`[${method} ${url}] Required roles: [${requiredRoles.join(', ')}]`);
+   this.logger.log(`[${method} ${url}] Checking roles for user: ${user?.email || 'N/A'}`);
+    this.logger.log(`[${method} ${url}] User role in JWT: ${user?.role || 'N/A'} (type: ${typeof user?.role}, value: ${JSON.stringify(user?.role)})`);
+    this.logger.log(`[${method} ${url}] Required roles: [${requiredRoles.map(r => `${r} (type: ${typeof r}, value: ${JSON.stringify(r)})`).join(', ')}]`);
 // If no user or user role, deny access (JwtAuthGuard should have caught this first)
     if (!user || !user.role) {
       this.logger.warn(`[${method} ${url}] Access denied: No user or user role found in JWT.`);
       throw new ForbiddenException('You do not have the necessary role to access this resource.');
     }
 // Check if the user's role is in the list of required roles
-const hasPermission = requiredRoles.includes(user.role);
+// CRITICAL FIX: Convert both to strings for robust comparison (handles enum vs string mismatch)
+const userRoleString = String(user.role).trim().toUpperCase();
+const requiredRolesStrings = requiredRoles.map(r => String(r).trim().toUpperCase());
+this.logger.log(`[${method} ${url}] Comparing: userRole='${userRoleString}' against requiredRoles=[${requiredRolesStrings.join(', ')}]`);
+
+const hasPermission = requiredRolesStrings.includes(userRoleString);
 
 if (!hasPermission) {
-      this.logger.warn(`[${method} ${url}] Access denied: User role '${user.role}' is not in required list [${requiredRoles.join(', ')}]`);
-      throw new ForbiddenException('You do not have the necessary role to access this resource.');
+      this.logger.warn(`[${method} ${url}] Access denied: User role '${user.role}' (normalized: '${userRoleString}') is not in required list [${requiredRoles.join(', ')}] (normalized: [${requiredRolesStrings.join(', ')}])`);
+      throw new ForbiddenException(`You do not have the necessary role to access this resource. Required: [${requiredRoles.join(', ')}], Your role: ${user.role}`);
     }
 
-    this.logger.debug(`[${method} ${url}] Access granted for role: ${user.role}`);
+    this.logger.log(`[${method} ${url}] Access granted for role: ${user.role}`);
     return hasPermission;
   }
 }

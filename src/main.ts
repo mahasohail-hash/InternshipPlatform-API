@@ -77,20 +77,58 @@ async function bootstrap() {
         'http://localhost:3001', // Backend itself
         'http://127.0.0.1:3001', // Backend alternative
       ];
-      // Allow requests with no origin (like Postman or file://) for development
-      if (!origin || allowedOrigins.includes(origin)) {
+      
+      // Normalize origins (remove trailing slashes and convert to lowercase for comparison)
+      const normalizeOrigin = (orig: string) => {
+        let normalized = orig.toLowerCase();
+        if (normalized.endsWith('/')) {
+          normalized = normalized.slice(0, -1);
+        }
+        return normalized;
+      };
+      
+      // Allow requests with no origin (like Postman, curl, mobile apps, or file://) for development
+      if (!origin) {
+        logger.log('CORS: Request with no origin header - allowing for development');
+        callback(null, true);
+        return;
+      }
+      
+      const normalizedOrigin = normalizeOrigin(origin);
+      const isAllowed = allowedOrigins.some(allowed => normalizeOrigin(allowed) === normalizedOrigin);
+      
+      if (isAllowed) {
+        logger.log(`CORS: Allowing request from origin: ${origin}`);
         callback(null, true);
       } else {
+        logger.error(`CORS: Blocked request from origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
         callback(new Error(`Not allowed by CORS: ${origin}`));
       }
     },
     credentials: true,
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    // CRITICAL FIX: Allow all common headers for robustness
-    allowedHeaders: 'Content-Type, Accept, Authorization, Cache-Control, X-Requested-With, Origin, X-CSRF-Token',
-    exposedHeaders: 'Content-Disposition', // For file downloads
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    // CRITICAL FIX: Allow all common headers for robustness - use array format for better compatibility
+    allowedHeaders: [
+      'Content-Type',
+      'Accept',
+      'Authorization',
+      'Cache-Control',
+      'X-Requested-With',
+      'Origin',
+      'X-CSRF-Token',
+      'Referer',
+      'sec-ch-ua',
+      'sec-ch-ua-mobile',
+      'sec-ch-ua-platform',
+      'User-Agent',
+      'Accept-Language',
+      'Accept-Encoding',
+      'Expires', // CRITICAL: Frontend sends this header
+    ],
+    exposedHeaders: ['Content-Disposition'], // For file downloads
     preflightContinue: false, // Ensure preflight response is handled here
     optionsSuccessStatus: 204, // Some browsers expect 204 for OPTIONS success
+    maxAge: 86400, // Cache preflight requests for 24 hours
   });
 
   // --- Global API Prefix ---

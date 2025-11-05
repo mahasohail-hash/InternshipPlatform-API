@@ -3,7 +3,11 @@ import { PartialType } from '@nestjs/mapped-types';
 import { CreateProjectDto } from './create-project.dto';
 import { IsOptional, IsString, IsUUID, IsEnum, IsArray, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CreateMilestoneDto } from './create-milestone.dto'; 
+import { CreateMilestoneDto } from './create-milestone.dto';
+import { ProjectStatus } from '../entities/project.entity';
+
 export class UpdateProjectDto extends PartialType(CreateProjectDto) {
-  status: import("c:/Users/maha.sohail_ventured/Documents/Projects/internship-management/internship-platform-backend/src/projects/entities/project.entity").ProjectStatus | undefined;
+  @IsOptional()
+  @IsEnum(ProjectStatus, { message: 'Invalid project status.' })
+  status?: ProjectStatus;
 }

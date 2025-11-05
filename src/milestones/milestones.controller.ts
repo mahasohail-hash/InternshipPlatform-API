@@ -17,7 +17,7 @@ export class MilestonesController {
   constructor(private readonly milestonesService: MilestonesService) {}
 
   @Post(':projectId')
-  @Roles(UserRole.MENTOR)
+  @Roles(UserRole.MENTOR, UserRole.HR)
   @HttpCode(HttpStatus.CREATED)
   create(
     @Param('projectId', ParseUUIDPipe) projectId: string,
@@ -54,7 +54,7 @@ export class MilestonesController {
   }
 
   @Patch(':milestoneId')
-  @Roles(UserRole.MENTOR)
+  @Roles(UserRole.MENTOR, UserRole.HR)
   update(
     @Param('milestoneId', ParseUUIDPipe) milestoneId: string,
     @Body() updateMilestoneDto: UpdateMilestoneDto,
@@ -65,7 +65,7 @@ export class MilestonesController {
   }
 
   @Delete(':milestoneId')
-  @Roles(UserRole.MENTOR)
+  @Roles(UserRole.MENTOR, UserRole.HR)
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(
     @Param('milestoneId', ParseUUIDPipe) milestoneId: string,
