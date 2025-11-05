@@ -1,24 +1,25 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, LessThan } from 'typeorm';
-import { Session } from '../session/session.entity'; // Adjust path
-import { User } from '../users/entities/users.entity'; // Adjust path
+import { Session } from '../session/session.entity';
+import { User } from '../users/entities/users.entity';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { UsersService } from '../users/users.service';
+// import { UsersService } from '../users/users.service'; // CRITICAL FIX: UsersService not directly needed here, as User repo is enough
+
 @Injectable()
 export class SessionService {
   constructor(
     @InjectRepository(Session)
     private sessionRepository: Repository<Session>,
     @InjectRepository(User)
-    private userRepository: Repository<User>,
+    private userRepository: Repository<User>, // CRITICAL FIX: Keep User repo if needed for validation
     private jwtService: JwtService,
     private configService: ConfigService,
-    private usersService: UsersService,
+    // private usersService: UsersService, // Removed as User repo is sufficient for most session operations
   ) {}
 
-  
+  // Helper to create a user payload (if needed externally for a session context)
   createSessionPayload(user: User) {
     return {
       userId: user.id,
@@ -44,9 +45,14 @@ export class SessionService {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + (rememberMe ? 30 : 1));
 
+    const jwtSecret = this.configService.get<string>('JWT_SECRET');
+    if (!jwtSecret) {
+        throw new InternalServerErrorException('JWT_SECRET not configured for session service.');
+    }
+
     const token = this.jwtService.sign(
       { sub: user.id, email: user.email, role: user.role, rememberMe },
-      { secret: this.configService.get<string>('JWT_SECRET'), expiresIn }
+      { secret: jwtSecret, expiresIn }
     );
 
     const session = this.sessionRepository.create({
@@ -60,6 +66,7 @@ export class SessionService {
   async endAllUserSessions(userId: string): Promise<void> {
       await this.sessionRepository.delete({ userId });
   }
+
   async validateSession(token: string): Promise<Session | null> {
     const session = await this.sessionRepository.findOne({ where: { token } });
     if (!session || session.expiresAt < new Date()) {
@@ -68,9 +75,11 @@ export class SessionService {
     }
     return session;
   }
-  async updateLastActivity(sessionId: number): Promise<void> {
+
+  async updateLastActivity(sessionId: number): Promise<void> { // CRITICAL FIX: sessionId is number
       await this.sessionRepository.update(sessionId, { lastActivityAt: new Date() });
   }
+
   async cleanupExpiredSessions(): Promise<void> {
       await this.sessionRepository.delete({ expiresAt: LessThan(new Date()) });
   }

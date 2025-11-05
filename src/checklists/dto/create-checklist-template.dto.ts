@@ -7,9 +7,7 @@ export class CreateChecklistTemplateItemDto {
   @IsString() @IsNotEmpty() title?: string;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsBoolean() required?: boolean;
-  @IsString()
-  @IsNotEmpty()
-  text!: string;
+ @IsOptional() @IsString() text?: string;
 }
 
 // 2. DTO for the main template

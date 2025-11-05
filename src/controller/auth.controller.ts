@@ -7,7 +7,7 @@ import { LoginDto } from '../users/dto/login.dto'; // Unused?
 import { RegisterDto } from '../users/dto/register.dto'; // Unused? Use CreateUserDto?
 import { RequestWithUser } from '../auth/interfaces/request-with-user.interface';
 import { User } from '../users/entities/users.entity'; // Import User entity
-
+import { Public } from '../auth/decorators/public.decorator'; // Assuming this exists
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) {}
@@ -34,6 +34,7 @@ export class AuthController {
   @UseGuards(AuthGuard('local')) // 'local' strategy validates and attaches user to req
   
   @Post('login')
+  @Public()
   @HttpCode(HttpStatus.OK)
   async login(@Req() req: RequestWithUser, @Res({ passthrough: true }) res: Response) {
     // req.user is populated by AuthGuard('local') after validateUser succeeds

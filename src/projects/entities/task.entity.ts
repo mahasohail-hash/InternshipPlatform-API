@@ -1,3 +1,5 @@
+// src/projects/entities/task.entity.ts
+
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -7,10 +9,8 @@ import {
   UpdateDateColumn,
   JoinColumn,
 } from 'typeorm';
-// Import dependencies from their core files or types
-import { Milestone } from './milestone.entity'; // Assuming Milestone is in the same folder or adjusted path
-import { User } from '../../users/entities/users.entity'; // <-- FIX: Corrected import to singular 'user.entity'
-import { AppModule } from '../../../src/app.module';
+import { Milestone } from './milestone.entity'; 
+import { User } from '../../users/entities/users.entity'; 
 
 // Define possible statuses for a task
 export enum TaskStatus {
@@ -20,12 +20,12 @@ export enum TaskStatus {
   BLOCKED = 'Blocked',
 }
 
-@Entity('tasks') // This decorator marks the class as a database table
+@Entity('tasks') 
 export class Task {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column()
+  @Column({ nullable: false }) 
   title!: string;
 
   @Column({ type: 'text', nullable: true })
@@ -34,27 +34,25 @@ export class Task {
   @Column({
     type: 'enum',
     enum: TaskStatus,
+    nullable: false,
     default: TaskStatus.TODO,
   })
   status!: TaskStatus;
 
-  // Raw Foreign Key column (used for direct database interaction)
+  // Raw Foreign Key column
   @Column({ type: 'uuid', nullable: false })
   milestoneId!: string;
 
+  // 🔥 CRITICAL FIX: Ensure explicit nullable Date type
   @Column({ type: 'timestamp', nullable: true })
-  dueDate?: Date;
+  dueDate?: Date | null; 
 
   // --- Relationships ---
 
-  // Many Tasks belong to one Milestone
-  // NOTE: This structure is now consistent with the Milestone entity, 
-  // which defines the inverse 'tasks' property.
   @ManyToOne(() => Milestone, milestone => milestone.tasks, { onDelete: 'CASCADE', nullable: false })
   @JoinColumn({ name: 'milestoneId' })
   milestone!: Milestone;
 
-  // Many Tasks can be assigned to one User (Intern) - Optional assignment
   @ManyToOne(() => User, (user) => user.assignedTasks, {
         nullable: true,
         onDelete: 'SET NULL'
@@ -62,7 +60,8 @@ export class Task {
   @JoinColumn({ name: 'assigneeId' })
   assignee?: User | null;
 
-  // --- Timestamps ---
+  @Column({ type: 'uuid', nullable: true })
+  assigneeId?: string | null;
 
   @CreateDateColumn()
   createdAt!: Date;

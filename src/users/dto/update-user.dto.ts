@@ -1,36 +1,37 @@
-// src/users/dto/update-user.dto.ts
 import { PartialType } from '@nestjs/mapped-types';
-import { CreateUserDto } from './create-user.dto';
-import { IsOptional, IsString, IsEmail, MinLength, IsEnum } from 'class-validator'; // Added IsEnum
-import { UserRole } from '../../common/enums/user-role.enum'; // Import UserRole enum
+import { CreateUserDto } from './create-user.dto'; // CRITICAL FIX: Correct import path
+import { IsOptional, IsString, IsEmail, MinLength, IsEnum } from 'class-validator';
+import { UserRole } from '../../common/enums/user-role.enum'; // CRITICAL FIX: Correct import path
 
 export class UpdateUserDto extends PartialType(CreateUserDto) {
+  // Overriding 'password' to allow it to be updated separately (e.g., via settings)
+  // But `ChangePasswordDto` is preferred for password changes.
   @IsOptional()
-  @IsString()
-  @MinLength(6, { message: 'Password must be at least 6 characters long' })
+  @IsString({ message: 'Password must be a string.' })
+  @MinLength(8, { message: 'Password must be at least 8 characters long.' })
   password?: string;
 
   @IsOptional()
-  @IsString()
-  username?: string;
-
-  @IsOptional()
-  @IsEmail()
+  @IsEmail({}, { message: 'Email must be a valid email address.' })
   email?: string;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'First name must be a string.' })
   firstName?: string;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'Last name must be a string.' })
   lastName?: string;
 
   @IsOptional()
-  @IsEnum(UserRole) // Validate against UserRole enum
-  role?: UserRole; // Changed type to UserRole
+  @IsEnum(UserRole, { message: 'Invalid user role.' })
+  role?: UserRole;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: 'Phone number must be a string.' })
   phone?: string;
+
+  @IsOptional()
+  @IsString({ message: 'GitHub username must be a string.' })
+  githubUsername?: string;
 }

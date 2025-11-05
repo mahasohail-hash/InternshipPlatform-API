@@ -1,65 +1,57 @@
-import { NestFactory,HttpAdapterHost } from '@nestjs/core';
+import { NestFactory, HttpAdapterHost } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
-import { UsersService } from './users/users.service'; // Ensure path is correct
+import { UsersService } from './users/users.service';
 import { UserRole } from './common/enums/user-role.enum';
-import { CreateUserDto } from './users/dto/create-user.dto'; // Ensure path is correct
-import { ValidationPipe, INestApplication, Logger } from '@nestjs/common'; // Added Logger
-import { AllExceptionsFilter } from './common/filters/all-exceptions.filter'; 
-// --- THIS IS THE FIX ---
-// Corrected the typo in the function name
-async function setupDefaultUsers(app: INestApplication) {
-  const { httpAdapter } = app.get(HttpAdapterHost);
-  app.useGlobalFilters(new AllExceptionsFilter(httpAdapter));
-// --- END FIX ---
+import { ValidationPipe, INestApplication, Logger } from '@nestjs/common';
+import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { CreateUserDto } from './users/dto/create-user.dto';
+import * as bcrypt from 'bcrypt';
+async function setupAndCreateDefaultUsers(app: INestApplication) {
   const logger = new Logger('DefaultUsersSetup');
-  try {
-    const usersService = app.get(UsersService);
-    const DEFAULT_PASSWORD = 'password123'; // Consider moving to config/env
+  const usersService = app.get(UsersService);
+  const DEFAULT_PASSWORD = 'password123';
 
-    const defaultUsersData = [
-      { email: 'hr@company.com', role: UserRole.HR, firstName: 'Default', lastName: 'HR' },
-      { email: 'mentor@company.com', role: UserRole.MENTOR, firstName: 'Default', lastName: 'Mentor' },
-      { email: 'intern@company.com', role: UserRole.INTERN, firstName: 'Default', lastName: 'Intern' },
-    ];
+  const defaultUsersData: CreateUserDto[] = [
+    { email: 'hr@company.com', role: UserRole.HR, firstName: 'Default', lastName: 'HR', password: DEFAULT_PASSWORD },
+    { email: 'mentor@company.com', role: UserRole.MENTOR, firstName: 'Default', lastName: 'Mentor', password: DEFAULT_PASSWORD },
+    { email: 'intern@company.com', role: UserRole.INTERN, firstName: 'Default', lastName: 'Intern', password: DEFAULT_PASSWORD },
+    { email: 'observer@company.com', role: UserRole.OBSERVER, firstName: 'Default', lastName: 'Observer', password: DEFAULT_PASSWORD },
+  ];
 
-    logger.log('Checking/Creating default users...');
+  logger.log('Checking/Creating default users...');
 
-    for (const userData of defaultUsersData) {
-      try {
-        const existingUser = await usersService.findOneByEmail(userData.email);
+  for (const userData of defaultUsersData) {
+    try {
+      const existingUser = await usersService.findOneByEmail(userData.email);
 
-        if (!existingUser) {
-          const userDto: CreateUserDto = {
-            email: userData.email,
-            password: DEFAULT_PASSWORD,
-            firstName: userData.firstName,
-            lastName: userData.lastName,
-            role: userData.role,
-          };
-          await usersService.create(userDto);
-          logger.log(`Default user created: ${userData.email} with password '${DEFAULT_PASSWORD}'`);
+      // CRITICAL FIX for bcrypt error: Only compare if passwordHash exists
+      if (existingUser && existingUser.passwordHash) {
+        const isPasswordMatch = await bcrypt.compare(userData.password, existingUser.passwordHash); // Compare plain with hashed
+        if (!isPasswordMatch || existingUser.role !== userData.role) {
+          await usersService._internal_forcePasswordReset(existingUser.id, userData.password, userData.role); // Use userData.password for reset
+          logger.warn(`Default user exists: ${userData.email}. Password forcibly reset and role updated to '${userData.role}'.`);
         } else {
-          // User exists - Force reset password and role
-          await usersService._internal_forcePasswordReset(existingUser.id, DEFAULT_PASSWORD, userData.role);
-          logger.warn(`Default user exists: ${userData.email}. Password forcibly reset to '${DEFAULT_PASSWORD}' and role set to ${userData.role}.`);
+          logger.log(`Default user exists: ${userData.email}. Password and role are up-to-date.`);
         }
-      } catch (error) {
-        logger.error(`Error during setup for ${userData.email}: ${error instanceof Error ? error.message : error}`);
+      } else if (!existingUser) { // User does not exist, create new
+        await usersService.create(userData);
+        logger.log(`Default user created: ${userData.email} with role '${userData.role}'.`);
+      } else { // User exists but passwordHash is null/undefined, force reset
+        await usersService._internal_forcePasswordReset(existingUser.id, userData.password, userData.role);
+        logger.warn(`Default user exists but had no passwordHash: ${userData.email}. Password forcibly reset and role updated to '${userData.role}'.`);
       }
+    } catch (error) {
+      logger.error(`Error during setup for ${userData.email}: ${error instanceof Error ? error.message : error}`);
     }
-    logger.log('Default users check/creation complete.');
-
-  } catch (error) {
-    logger.error(`FATAL ERROR during default users setup: ${error instanceof Error ? error.message : error}`);
   }
+  logger.log('Default users check/creation complete.');
 }
 
-
-// Main bootstrap function
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  const logger = new Logger('Bootstrap'); // Logger for bootstrap process
+
+  const logger = new Logger('Bootstrap');
 
   // --- Global Configuration ---
   app.useGlobalPipes(new ValidationPipe({
@@ -70,29 +62,48 @@ async function bootstrap() {
           enableImplicitConversion: true,
       },
   }));
-         
+
+  const { httpAdapter } = app.get(HttpAdapterHost);
+  app.useGlobalFilters(new AllExceptionsFilter(httpAdapter));
+
   // --- CORS ---
+  // CRITICAL FIX: Use a function for origin to match both localhost and 127.0.0.1
+  // CRITICAL FIX: AllowedHeaders to include all common ones, and wildcard for robustness
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000', // Use environment variable
+    origin: (origin, callback) => {
+      const allowedOrigins = [
+        process.env.FRONTEND_URL || 'http://localhost:3000', // Frontend default
+        'http://127.0.0.1:3000', // Frontend alternative
+        'http://localhost:3001', // Backend itself
+        'http://127.0.0.1:3001', // Backend alternative
+      ];
+      // Allow requests with no origin (like Postman or file://) for development
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`Not allowed by CORS: ${origin}`));
+      }
+    },
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: 'Content-Type, Accept, Authorization',
+    // CRITICAL FIX: Allow all common headers for robustness
+    allowedHeaders: 'Content-Type, Accept, Authorization, Cache-Control, X-Requested-With, Origin, X-CSRF-Token',
+    exposedHeaders: 'Content-Disposition', // For file downloads
+    preflightContinue: false, // Ensure preflight response is handled here
+    optionsSuccessStatus: 204, // Some browsers expect 204 for OPTIONS success
   });
 
   // --- Global API Prefix ---
   app.setGlobalPrefix('api');
 
   // --- Default User Setup ---
-  // This line now correctly calls the function defined above
-  await setupDefaultUsers(app);
+  await setupAndCreateDefaultUsers(app);
 
   // --- Start Listening ---
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') || 3001;
-  await app.listen(3001);
+  await app.listen(port);
   logger.log(`🚀 Application is running on: ${await app.getUrl()}`);
 }
 
-// Start the application
 bootstrap();
-

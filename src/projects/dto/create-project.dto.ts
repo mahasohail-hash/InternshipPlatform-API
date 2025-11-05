@@ -3,38 +3,39 @@ import {
   IsNotEmpty,
   IsOptional,
   IsArray,
-  ValidateNested, // Must be imported
+  ValidateNested,
   IsUUID,
-  // IsEnum, // If you add status later
+  IsEnum,
 } from 'class-validator';
-import { Type } from 'class-transformer'; // Must be imported
-import { CreateMilestoneDto } from './create-milestone.dto'; // Import the corrected Milestone DTO
-// import { ProjectStatus } from '../entities/project.entity';
+import { Type } from 'class-transformer';
+import { CreateMilestoneDto } from './create-milestone.dto';
+import { ProjectStatus } from '../entities/project.entity'; // Import ProjectStatus
 
 export class CreateProjectDto {
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: 'Project title must be a string.' })
+  @IsNotEmpty({ message: 'Project title should not be empty.' })
   title!: string;
 
-  @IsString()
+  @IsString({ message: 'Project description must be a string.' })
   @IsOptional()
   description?: string;
 
-  // Assuming you assign ONE intern to the whole project during creation
   @IsUUID('4', { message: 'Assigned intern ID must be a valid UUID.' })
-  @IsNotEmpty({ message: 'Intern assignment is required.' }) // Or IsOptional
+  @IsNotEmpty({ message: 'Intern assignment is required.' })
   internId!: string;
 
-  // --- ENSURE THIS IS CORRECT ---
-  // Validate the nested array of milestones
+  // CRITICAL FIX: Add mentorId as optional for HR to specify, otherwise derive from token
+  @IsUUID('4', { message: 'Mentor ID must be a valid UUID.' })
+  @IsOptional()
+  mentorId?: string;
+
   @IsArray()
   @IsOptional()
-  @ValidateNested({ each: true }) // Validate each Milestone object
-  @Type(() => CreateMilestoneDto) // Use CreateMilestoneDto for validation
+  @ValidateNested({ each: true })
+  @Type(() => CreateMilestoneDto)
   milestones?: CreateMilestoneDto[];
-  // --------------------------
 
-  // @IsEnum(ProjectStatus)
-  // @IsOptional()
-  // status?: ProjectStatus; // Service should likely set default status
+  @IsEnum(ProjectStatus, { message: 'Invalid project status.' })
+  @IsOptional() // Allow setting initial status, or service defaults to PLANNING
+  status?: ProjectStatus;
 }

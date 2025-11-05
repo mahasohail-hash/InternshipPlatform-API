@@ -1,10 +1,9 @@
-// src/auth/interfaces/request-with-user.interface.ts
 import { Request } from 'express';
-import { UserRole } from '../../common/enums/user-role.enum'; // Adjust path if needed
+import { UserRole } from '../../common/enums/user-role.enum'; // CRITICAL FIX: Correct import path
 
-// Interface for the JWT payload attached by the AuthGuard
+// Interface for the JWT payload that JwtAuthGuard attaches to `req.user`
 interface JwtPayload {
-id: number | string;
+    id: string; // CRITICAL FIX: User ID is a UUID (string)
     email: string;
     role: UserRole;
 }

@@ -1,24 +1,24 @@
-// src/milestones/dto/create-milestone.dto.ts
-import { IsString, IsNotEmpty, IsOptional, IsDateString, IsUUID } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsDateString, IsArray, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+// CRITICAL FIX: Correct the import path to be relative or use an alias like '@projects/dto/create-task.dto'
+import { CreateTaskDto } from '../../projects/dto/create-task.dto';
 
 export class CreateMilestoneDto {
-  @IsString()
-  @IsNotEmpty()
-  name!: string;
+  @IsString({ message: 'Milestone title must be a string.' })
+  @IsNotEmpty({ message: 'Milestone title should not be empty.' })
+  title!: string;
 
-  @IsString()
+  @IsString({ message: 'Milestone description must be a string.' })
   @IsOptional()
   description?: string;
 
-  @IsDateString()
+  @IsDateString({}, { message: 'Milestone due date must be a valid ISO 8601 date string.' })
   @IsOptional()
-  dueDate?: Date;
+  dueDate?: string;
 
-  @IsString()
+  @IsArray()
   @IsOptional()
-  status?: string;
-
-  @IsUUID()
-  @IsNotEmpty()
-  projectId!: string;
+  @ValidateNested({ each: true })
+  @Type(() => CreateTaskDto)
+  tasks?: CreateTaskDto[];
 }

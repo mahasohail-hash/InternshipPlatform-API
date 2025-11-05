@@ -1,217 +1,230 @@
-import { Injectable, Inject, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, InternalServerErrorException, UnauthorizedException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere ,FindManyOptions} from 'typeorm';
-import { EvaluationType } from './entities/evaluation.entity'; // Entity must have 'feedbackText' and 'id'
-import { CreateEvaluationDto } from './dto/create-evaluation.dto'; // Expects number 'internId', string 'comments'
-import { UsersService } from '../users/users.service'; // Assumes findOne expects string UUID for User ID
-import { User } from '../users/entities/users.entity'; // Assuming User entity has string 'id'
-import { Repository } from 'typeorm';
-import { Evaluation } from './entities/evaluation.entity';
+import { Repository, FindOptionsWhere, FindManyOptions, In } from 'typeorm'; // CRITICAL FIX: Import In
+import { User } from '../users/entities/users.entity';
+import { Evaluation, EvaluationType } from './entities/evaluation.entity';
+import { CreateEvaluationDto } from './dto/create-evaluation.dto';
 import { UserRole } from '../common/enums/user-role.enum';
-// --- Mock Service Definitions ---
-// These need to exist and be provided in evaluations.module.ts
-@Injectable()
-export class GithubIntegrationService {
-  // Mock expects number internId
-  async getContributionMetrics(internId: number): Promise<{ commits: number; linesChanged: number; pullRequests: number }> {
-    console.log(`[Mock Github] Getting metrics for intern ID (number): ${internId}`);
-    if (typeof internId !== 'number' || isNaN(internId)) {
-        console.error("[Mock Github] Received invalid internId:", internId);
-        return { commits: 0, linesChanged: 0, pullRequests: 0 };
-    }
-    const commits = Math.floor(Math.random() * 40) + 10;
-    const linesChanged = commits * (Math.floor(Math.random() * 50) + 10);
-    const pullRequests = Math.floor(commits / 5);
-    return { commits, linesChanged, pullRequests };
-  }
-}
-@Injectable()
-export class NlpService {
-  async summarizeFeedback(feedbackTexts: string[]): Promise<{ sentiment: string; themes: string[] }> {
-    console.log(`[Mock NLP] Analyzing ${feedbackTexts.length} feedback notes...`);
-    if (feedbackTexts.length === 0) return { sentiment: 'neutral', themes: ['no feedback'] };
-    // Simplified logic
-    const positiveWords = ['great', 'excellent', 'good', 'fast', 'creative'];
-    const negativeWords = ['slow', 'struggled', 'bug', 'error', 'issue'];
-    const fullText = feedbackTexts.join(' ').toLowerCase();
-    let score = 0;
-    positiveWords.forEach(w => { if (fullText.includes(w)) score++; });
-    negativeWords.forEach(w => { if (fullText.includes(w)) score--; });
-    const sentiment = score > 0 ? 'positive' : score < 0 ? 'negative' : 'neutral';
-    const themes = ['mock theme 1', 'mock theme 2']; // Keep mock simple
-    return { sentiment, themes };
-   }
-}
-@Injectable()
-export class LlmService {
-  async generateReview(prompt: string): Promise<string> {
-    console.log('[Mock LLM] Generating review...');
-    // Simple mock based on prompt content
-    return `AI MOCK DRAFT:\nIntern shows potential. Based on ${prompt.includes('positive') ? 'positive' : 'mixed'} feedback and metrics.\n(Themes: ${prompt.split('Themes: ')[1]?.split('\n')[0] || 'N/A'})`;
-  }
-}
-// ------------------------------
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GithubService } from '../github/github.service';
+import { AnalyticsService } from '../analytics/analytics.service';
+import { ConfigService } from '@nestjs/config';
+import { ProjectsService } from '../projects/projects.service';
 
 @Injectable()
 export class EvaluationsService {
+   private readonly genAI: GoogleGenerativeAI | undefined;
+   private readonly LLM_MODEL: string = 'gemini-pro';
+   private readonly USE_AI_MOCKS: boolean;
+
   constructor(
-    @InjectRepository(Evaluation)
-    private readonly evaluationRepository: Repository<Evaluation>,
-    private readonly usersService: UsersService,
-    private readonly githubService: GithubIntegrationService,
-    private readonly nlpService: NlpService,
-    private readonly llmService: LlmService,
-  ) {}
+    @InjectRepository(Evaluation) private evaluationRepository: Repository<Evaluation>,
+    @InjectRepository(User) private userRepository: Repository<User>,
+    private readonly githubService: GithubService,
+    private readonly analyticsService: AnalyticsService,
+    private readonly configService: ConfigService,
+    private readonly projectsService: ProjectsService,
+  ) {
+    const googleApiKey = this.configService.get<string>('GOOGLE_AI_API_KEY');
+    this.USE_AI_MOCKS = this.configService.get<boolean>('USE_AI_MOCKS', false);
 
-  // Expects mentorId string (UUID), DTO has number internId
-  async create(createEvaluationDto: CreateEvaluationDto, mentorId: string): Promise<Evaluation> {
-    console.log('[Service Create] Received DTO:', createEvaluationDto);
-    let mentor: User | null;
-    let intern: User | null;
-
-    try {
-      mentor = await this.usersService.findOne(mentorId); // Find mentor by UUID string
-      if (!mentor) throw new NotFoundException(`Mentor with ID "${mentorId}" not found.`);
-
-      // Convert number internId from DTO to string for findOne (assuming User ID is UUID)
-      intern = await this.usersService.findOne(String(createEvaluationDto.internId));
-      if (!intern) throw new NotFoundException(`Intern with ID "${createEvaluationDto.internId}" not found.`);
-
-    } catch (error) {
-       console.error('[Service Create] Error finding user:', error);
-       if (error instanceof NotFoundException) throw error;
-       throw new InternalServerErrorException('Error retrieving user details.');
-    }
-
-    try {
-      // Create evaluation using entity field 'feedbackText', mapped from DTO 'comments'
-      const newEvaluation = this.evaluationRepository.create({
-        type: createEvaluationDto.type,
-        score: createEvaluationDto.score,
-feedbackText: createEvaluationDto.feedbackText, // Use the actual DTO field name        mentor: mentor,
-        intern: intern,
-      });
-      console.log('[Service Create] Saving evaluation for intern:', intern.id);
-      return await this.evaluationRepository.save(newEvaluation);
-
-    } catch (error) {
-        console.error('[Service Create] Error saving evaluation to DB:', error);
-        throw new InternalServerErrorException('Database error while saving evaluation.');
+    if (googleApiKey && !this.USE_AI_MOCKS) {
+      this.genAI = new GoogleGenerativeAI(googleApiKey);
+    } else {
+      console.warn("WARNING: Google AI API Key not configured or USE_AI_MOCKS is true. AI drafting will return mock data.");
+      this.genAI = undefined;
     }
   }
 
-async findAll(userId: string, userRole: UserRole): Promise<Evaluation[]> {
+  async createEvaluation(dto: CreateEvaluationDto, submitterId: string): Promise<Evaluation> {
+    console.log('[EvaluationsService] Received DTO:', dto);
+    const isSelfReview = dto.type === EvaluationType.SELF;
+
+    const intern = await this.userRepository.findOneBy({ id: dto.internId });
+    if (!intern) throw new NotFoundException(`Intern with ID "${dto.internId}" not found.`);
+
+    let mentor: User | null | undefined;
+    if (!isSelfReview) {
+        mentor = await this.userRepository.findOneBy({ id: submitterId, role: UserRole.MENTOR });
+        if (!mentor) {
+            throw new UnauthorizedException('Only a mentor can submit this type of evaluation.');
+        }
+        const isMentorForIntern = await this.projectsService.isMentorAssignedToIntern(mentor.id, intern.id);
+        if (!isMentorForIntern) {
+            throw new ForbiddenException('You are not authorized to submit evaluations for this intern.');
+        }
+    } else {
+         if (submitterId !== intern.id) {
+             throw new UnauthorizedException('You can only submit a self-review for yourself.');
+         }
+        mentor = undefined;
+    }
+
+    const newEvaluation = this.evaluationRepository.create({
+        score: dto.score,
+        feedbackText: dto.feedbackText,
+        type: dto.type,
+        intern: intern,
+        internId: intern.id,
+        mentor: mentor,
+        mentorId: mentor ? mentor.id : undefined,
+    });
+    console.log('[EvaluationsService] Saving evaluation for intern:', intern.id);
+    return this.evaluationRepository.save(newEvaluation);
+  }
+
+  async findAll(userId: string, userRole: UserRole, queryInternId?: string): Promise<Evaluation[]> {
     const findOptions: FindManyOptions<Evaluation> = {
-        relations: ['intern', 'mentor'], 
+        relations: ['intern', 'mentor'],
+        order: { createdAt: 'DESC' }
     };
-console.log(`[DEBUG] Attempting UNFILTERED fetch for ${userRole} (${userId})`);
 
     if (userRole === UserRole.INTERN) {
-        // Interns should only see evaluations they are part of
-        findOptions.where = [
-            { intern: { id: userId } },
-            { mentor: { id: userId } }, // If they did a self-review/mentee review
-        ];
+        findOptions.where = { intern: { id: userId } };
     } else if (userRole === UserRole.MENTOR) {
-        // Mentors should only see evaluations they created or are linked to
-        findOptions.where = { mentor: { id: userId } };
-    } 
-    
-    // The query should return ALL evaluations for HR users.
+        const mentoredInterns = await this.projectsService.getMentoredInternsIds(userId);
+        if (mentoredInterns.length === 0) return [];
+
+        // CRITICAL FIX: Use 'In' operator correctly for OR condition
+        findOptions.where = [
+            { mentor: { id: userId } }, // Evaluations submitted by this mentor
+            { intern: { id: In(mentoredInterns) }, type: EvaluationType.SELF } // Self-reviews of their interns
+        ];
+
+        if (queryInternId) {
+            if (!mentoredInterns.includes(queryInternId)) {
+                throw new ForbiddenException('You are not authorized to view evaluations for this intern.');
+            }
+            // If querying a specific intern, narrow down the conditions
+            findOptions.where = [
+                { mentor: { id: userId }, intern: { id: queryInternId } },
+                { intern: { id: queryInternId }, type: EvaluationType.SELF }
+            ];
+        }
+    } else if (userRole === UserRole.HR) {
+        if (queryInternId) {
+            findOptions.where = { intern: { id: queryInternId } };
+        }
+    } else {
+        return [];
+    }
+
     return this.evaluationRepository.find(findOptions);
-}
+  }
 
+  async generateAiDraft(internId: string, mentorId: string): Promise<{ draft: string }> {
+    console.log(`[EvaluationsService GenerateDraft] Intern ID: ${internId} by mentor: ${mentorId}`);
 
+    const intern = await this.userRepository.findOneBy({ id: internId, role: UserRole.INTERN });
+    const mentor = await this.userRepository.findOneBy({ id: mentorId, role: UserRole.MENTOR });
 
-  // Expects internId as number
-  async generateAiDraft(internId: number): Promise<{ draft: string }> {
-    console.log(`[Service GenerateDraft] Received intern ID (number): ${internId}`);
-    if (typeof internId !== 'number' || isNaN(internId)) {
-        console.error('[Service GenerateDraft] Invalid internId type received:', typeof internId);
-        throw new InternalServerErrorException('Invalid intern ID format for generating draft.');
+    if (!intern) throw new NotFoundException(`Intern with ID "${internId}" not found or is not an INTERN.`);
+    if (!mentor) throw new NotFoundException(`Mentor with ID "${mentorId}" not found or is not a MENTOR.`);
+
+    const isMentorForIntern = await this.projectsService.isMentorAssignedToIntern(mentor.id, intern.id);
+    if (!isMentorForIntern) {
+        throw new ForbiddenException('You are not authorized to generate drafts for this intern.');
     }
 
-    let intern: User | null;
-    try {
-      // Convert number internId to string for findOne (assuming User ID is UUID)
-      intern = await this.usersService.findOne(String(internId));
-      if (!intern) throw new NotFoundException(`Intern with ID "${internId}" not found.`);
-      console.log(`[Service GenerateDraft] Found intern: ${intern.firstName}`);
+    const internInsights = await this.analyticsService.getInternInsights(internId);
 
-    } catch (error) {
-       console.error(`[Service GenerateDraft] Error fetching intern ${internId}:`, error);
-       if (error instanceof NotFoundException) throw error;
-       throw new InternalServerErrorException('Error fetching intern details for draft.');
+    const githubData = internInsights.github;
+    const nlpData = internInsights.nlp;
+    const taskData = internInsights.tasks;
+
+    const totalCommits = githubData?.totalCommits || 0;
+    const totalAdditions = githubData?.totalAdditions || 0;
+    const totalDeletions = githubData?.totalDeletions || 0;
+    const taskCompletionRate = taskData?.completionRate?.toFixed(0) || '0';
+    const sentiment = nlpData?.sentimentScore || "Neutral";
+    const keyThemes = nlpData?.keyThemes?.join(', ') || "No specific themes identified.";
+
+    const prompt = `
+      You are an experienced HR professional drafting a performance review for an intern.
+      Draft a ${EvaluationType.MIDPOINT} review for intern ${intern.firstName} ${intern.lastName}.
+      This intern is mentored by ${mentor.firstName} ${mentor.lastName}.
+
+      **Instructions for Review Draft:**
+      - **Tone:** Professional, encouraging, constructive.
+      - **Structure:** Start with a brief introduction, then cover strengths, areas for growth, and future recommendations. Conclude with an positive outlook statement.
+      - **Word Count:** Keep it concise, around 200-300 words.
+      - **Focus:** Highlight contributions and identify specific areas for improvement based on provided metrics.
+
+      **Intern Data & Performance Metrics:**
+      - Intern Name: ${intern.firstName} ${intern.lastName}
+      - Total commits in monitored GitHub repositories: ${totalCommits}
+      - Total lines added in code: ${totalAdditions}
+      - Total lines deleted in code: ${totalDeletions}
+      - Overall task completion rate: ${taskCompletionRate}%
+      - Aggregated sentiment from previous feedback: ${sentiment}
+      - Key thematic areas from previous feedback: ${keyThemes}
+
+      Generate the draft review text.
+    `;
+
+    console.log("[EvaluationsService GenerateDraft] Generated Prompt:\n", prompt);
+
+    if (!this.genAI || this.USE_AI_MOCKS) {
+        console.warn("MOCK AI DRAFT: Returning a mock draft.");
+        const mockResponse = `
+        [AI Generated Draft - MOCK]
+        Dear ${intern.firstName},
+
+        This is your ${EvaluationType.MIDPOINT} review, reflecting on your performance as an intern.
+
+        **Strengths:**
+        Your proactive engagement is commendable. GitHub records show approximately ${totalCommits} commits, with ${totalAdditions} lines added and ${totalDeletions} lines deleted, indicating active contribution to our codebase. Your task completion rate is ${taskCompletionRate}%, which is a strong indicator of your reliability and ability to meet deadlines. Feedback highlights a generally ${sentiment} sentiment, with themes such as ${keyThemes}.
+
+        **Areas for Growth:**
+        Consider exploring deeper into project architecture to understand the broader impact of your code. Proactively seeking feedback on code quality and best practices could also accelerate your growth.
+
+        **Recommendations:**
+        Continue to build on your technical skills by taking on new challenges. We encourage you to engage more in team discussions and leverage mentorship opportunities to further develop your professional communication.
+
+        We look forward to your continued growth.
+
+        Best regards,
+        ${mentor.firstName} ${mentor.lastName}
+        `;
+        return { draft: mockResponse };
     }
 
-    let existingEvals: Evaluation[] = [];
     try {
-      // Use string UUID for relation query
-      const whereClause: FindOptionsWhere<Evaluation> = {
-          intern: { id: String(internId) },
-          type: EvaluationType.WEEKLY,
-      };
-      existingEvals = await this.evaluationRepository.find({
-        where: whereClause,
-        select: ['feedbackText'], // Ensure Evaluation entity has 'feedbackText'
-        order: { id: 'DESC' }, // Order by ID if no createdAt
-        take: 10, // Limit number of evals to process
-      });
-      console.log(`[Service GenerateDraft] Found ${existingEvals.length} previous weekly evaluations.`);
+        const model = this.genAI.getGenerativeModel({ model: this.LLM_MODEL });
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        const text = response.text();
+        return { draft: text };
 
-    } catch (error) {
-       console.error(`[Service GenerateDraft] Error fetching existing evaluations for intern ${internId}:`, error);
-       throw new InternalServerErrorException('Error fetching previous evaluations for draft.');
-    }
-
-    // Use correct field name from entity
-    const feedbackTexts = existingEvals.map(e => e.feedbackText);
-
-    try {
-      // Pass number ID to mock service
-      const githubMetrics = await this.githubService.getContributionMetrics(internId);
-      const feedbackSummary = await this.nlpService.summarizeFeedback(feedbackTexts);
-
-      const prompt = `
-        Draft review for: ${intern.firstName} ${intern.lastName} (ID: ${internId}).
-        GitHub Metrics: ${githubMetrics.commits} commits, ${githubMetrics.linesChanged} lines changed, ${githubMetrics.pullRequests} PRs.
-        Summary based on ${feedbackTexts.length} weekly notes:
-        Sentiment: ${feedbackSummary.sentiment}. Key Themes: ${feedbackSummary.themes.join(', ')}.
-      `;
-      console.log(`[Service GenerateDraft] Generated prompt for LLM.`);
-
-      const draftText = await this.llmService.generateReview(prompt);
-      console.log(`[Service GenerateDraft] Received draft from LLM successfully.`);
-      return { draft: draftText };
-
-    } catch (error) {
-       console.error(`[Service GenerateDraft] Error during AI draft external service calls for intern ${internId}:`, error);
-       throw new InternalServerErrorException('Error during AI draft generation process.');
+    } catch (llmError: any) {
+        console.error("[LLM ERROR] Failed to generate AI draft:", llmError.message || llmError);
+        throw new InternalServerErrorException(`AI draft generation failed. ${llmError.message}`);
     }
   }
 
-  // Expects internId as number
-  async getEvaluationsForIntern(internId: string): Promise<Evaluation[]> {
-    console.log(`[Service GetEvals] Received intern ID (number): ${internId}`);
-    // Convert number internId to string for findOne (assuming User ID is UUID)
-    const intern = await this.usersService.findOne(String(internId));
-    if (!intern) throw new NotFoundException(`Intern with ID "${internId}" not found.`);
+  async getEvaluationsForIntern(internId: string, requesterId: string, requesterRole: UserRole): Promise<Evaluation[]> {
+    const intern = await this.userRepository.findOneBy({ id: internId, role: UserRole.INTERN });
+    if (!intern) throw new NotFoundException(`Intern with ID "${internId}" not found or is not an INTERN.`);
+
+    if (requesterRole === UserRole.MENTOR) {
+        const isMentorForIntern = await this.projectsService.isMentorAssignedToIntern(requesterId, internId);
+        if (!isMentorForIntern) {
+            throw new ForbiddenException('You are not authorized to view evaluations for this intern.');
+        }
+    }
 
     try {
-      // Use string UUID for relation query
       const whereClause: FindOptionsWhere<Evaluation> = {
-          intern: { id: String(internId) }
+          intern: { id: internId }
       };
-      console.log(`[Service GetEvals] Fetching evaluations for intern ID: ${intern.id}`);
       return this.evaluationRepository.find({
-      where: { intern: { id: internId } },
-      relations: ['mentors'],               
-      order: { createdAt: 'DESC' },     
-    });
+        where: whereClause,
+        relations: ['intern', 'mentor'],
+        order: { createdAt: 'DESC' },
+      });
     } catch (error) {
-      console.error(`[Service GetEvals] Error fetching evaluations for intern ${internId}:`, error);
+      console.error(`[EvaluationsService] Error fetching evaluations for intern ${internId}:`, error);
       throw new InternalServerErrorException('Error fetching evaluations from database.');
     }
   }
-
 }

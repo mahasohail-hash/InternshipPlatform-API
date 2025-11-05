@@ -18,11 +18,16 @@ export class CreateMilestoneDto {
   @IsOptional()
   dueDate?: string;
 
+
+
+
   // --- ENSURE THIS IS CORRECT ---
   // Validate the nested array of tasks
   @IsArray()
-  @IsOptional()
-  @ValidateNested({ each: true }) // Validate each Task object
-  @Type(() => CreateTaskDto)      // Use CreateTaskDto for validation
-  tasks?: CreateTaskDto[];
+    @IsOptional()
+    @ValidateNested({ each: true })
+    @Type(() => CreateTaskDto)
+    tasks?: CreateTaskDto[];
+  
+  
 }

@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "es2016",
     "module": "commonjs",
-    "lib": ["es2016", "esnext", "dom"], // Added dom for fetch types if needed
+    "lib": ["es2016", "esnext", "dom"],
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "esModuleInterop": true,
@@ -10,8 +10,12 @@
     "strict": true,
     "skipLibCheck": true,
     "outDir": "./dist",
-    "rootDir": "./src"
+    "rootDir": "./src",
+    "baseUrl": "./src", // CRITICAL FIX: Added baseUrl to resolve @/ aliases
+    "paths": {
+      "@/*": ["*"] // CRITICAL FIX: Added path mapping for @/
+    }
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": ["src/**/*.ts", "test/**/*.ts"], // CRITICAL FIX: Include test directory
+  "exclude": ["node_modules", "dist"]
 }

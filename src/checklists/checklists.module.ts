@@ -11,6 +11,7 @@ import { InternChecklist } from './entities/intern-checklist.entity';
 import { InternChecklistItem } from './entities/intern-checklist-item.entity';
 import { Checklist } from './entities/checklist.entity'; 
 import { ChecklistItem } from './entities/checklist-item.entity';
+import { EntityManager } from 'typeorm';
 @Module({
  imports: [
 TypeOrmModule.forFeature([
@@ -23,7 +24,7 @@ InternChecklist,
 ]),
  ],
  controllers: [ChecklistsController],
- providers: [ChecklistsService],
+ providers: [ChecklistsService, EntityManager,],
  exports: [ChecklistsService, TypeOrmModule], // <-- Also export service
 })
 export class ChecklistsModule {}

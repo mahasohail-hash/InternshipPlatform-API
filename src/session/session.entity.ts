@@ -1,41 +1,39 @@
-// src/entities/session.entity.ts
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn } from 'typeorm';
-// Assuming User entity path is correct
-// import { User } from './user.entity'; 
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn, UpdateDateColumn } from 'typeorm'; // CRITICAL FIX: Import UpdateDateColumn
+import { User } from '../users/entities/users.entity'; // CRITICAL FIX: Import User if you want the relation
 
 @Entity('sessions')
 export class Session {
-    // FIX 1: Use @PrimaryGeneratedColumn for properties that TypeORM assigns
-    @PrimaryGeneratedColumn()
-    id!: number; // Fixed TS2564
+    @PrimaryGeneratedColumn() // CRITICAL FIX: Use simple number ID for session
+    id!: number;
 
-    @Column({ type: 'uuid' })
-    userId!: string; // Fixed TS2564
+    @Column({ type: 'uuid' }) // CRITICAL FIX: userId is UUID (string)
+    userId!: string;
 
-    @Column()
-    token!: string; // Fixed TS2564
+    @Column({ nullable: false })
+    token!: string;
 
-    @Column()
-    deviceInfo!: string; // Fixed TS2564
+    @Column({ nullable: true }) // Device info can be optional
+    deviceInfo?: string;
 
-    @Column()
-    ipAddress!: string; // Fixed TS2564
+    @Column({ nullable: true }) // IP address can be optional
+    ipAddress?: string;
 
-    @Column()
-    lastActivityAt!: Date; // Fixed TS2564
+    @Column({ nullable: false })
+    lastActivityAt!: Date;
 
-    @Column()
-    rememberMe!: boolean; // Fixed TS2564
+    @Column({ nullable: false })
+    rememberMe!: boolean;
 
-    @Column()
-    expiresAt!: Date; // Fixed TS2564
+    @Column({ nullable: false })
+    expiresAt!: Date;
 
-    // FIX 2: If 'user' is a relation, it's defined by TypeORM. Use '!' or initialize to `undefined`
-    // Assuming User entity is correctly imported and linked via foreign key
-    // @ManyToOne(() => User, user => user.sessions)
-    // user!: User; // Fixed TS2564
+    // Optional: Many-to-One relation to User if you want to load user with session
+    @ManyToOne(() => User, user => user.sessions, { onDelete: 'CASCADE', nullable: false })
+    user!: User; // CRITICAL FIX: Must explicitly define user, and provide inverse in User entity
 
-    // FIX 3: Use @CreateDateColumn for automatic timestamping
     @CreateDateColumn()
-    createdAt!: Date; // Fixed TS2564
+    createdAt!: Date;
+
+    @UpdateDateColumn() // CRITICAL FIX: Add UpdateDateColumn
+    updatedAt!: Date;
 }

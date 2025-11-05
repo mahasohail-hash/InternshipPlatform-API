@@ -17,15 +17,15 @@ router.post('/login', /* validateLogin, */ async (req: Request, res: Response) =
     // Fetch user including the password
     const user = await userRepository.findOne({
         where: { email },
-        select: ["id", "email", "password", "role", "firstName", "lastName"] // Explicitly select password
+        select: ["id", "email", "passwordHash", "role", "firstName", "lastName"] // Explicitly select password
     });
 
-    if (!user || !user.password) { // Check if user exists and password was loaded
+    if (!user || !user.passwordHash) { // Check if user exists and password was loaded
       return res.status(401).json({ message: 'Invalid credentials.' });
     }
 
     // --- FIX: Use user.password ---
-    const isPasswordValid = await bcrypt.compare(password, user.password);
+    const isPasswordValid = bcrypt.compare(password, user.passwordHash);
     // --- End Fix ---
 
     if (!isPasswordValid) {

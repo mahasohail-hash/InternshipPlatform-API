@@ -1,73 +1,66 @@
-// src/users/entities/user.entity.ts
 import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  OneToMany, 
-  ManyToMany,
-  CreateDateColumn,
-  UpdateDateColumn,
+  Entity, PrimaryGeneratedColumn, Column, OneToMany,
+  CreateDateColumn, UpdateDateColumn,
 } from 'typeorm';
 import { Evaluation } from '../../evaluations/entities/evaluation.entity';
-import { Checklist } from '../../checklists/entities/checklist.entity'; 
-import { Project } from '../../projects/entities/project.entity';    
-import { Task } from '../../projects/entities/task.entity';       
-import { UserRole } from '../../common/enums/user-role.enum'; 
-import { InternChecklist } from '../../checklists/entities/intern-checklist.entity'; 
-import { GitHubMetrics } from '../../analytics/entities/github-metrics.entity'; // <-- Import the new entity
+import { Project } from '../../projects/entities/project.entity';
+import { Task } from '../../projects/entities/task.entity';
+import { UserRole } from '../../common/enums/user-role.enum';
+import { NlpSummary } from '../../analytics/entities/nlp-summary.entity';
+import { InternChecklist } from '../../checklists/entities/intern-checklist.entity';
+import { GitHubMetrics } from '../../github/entities/github-metrics.entity';
+import { Session } from '../../session/session.entity';
+import { Checklist } from '../../checklists/entities/checklist.entity'; // CRITICAL FIX: Import Checklist entity
+
 @Entity('users')
 export class User {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
+  @PrimaryGeneratedColumn('uuid') id!: string;
 
-  @Column({ unique: true, nullable: false })
-  email!: string;
+  @Column({ unique: true, nullable: false }) email!: string;
 
-  @Column({ nullable: true , select: false }) // select: false hides it in standard queries
-  password!: string;
+  @Column({ nullable: false, select: false })
+  passwordHash!: string;
 
-@Column({ nullable: true }) // <-- Must match DB
-    firstName?: string; // <-- Change ! to ?
+  @Column({ nullable: true }) firstName?: string;
+  @Column({ nullable: true }) lastName?: string;
+  @Column({ nullable: true }) githubUsername?: string;
 
-    @Column({ nullable: true }) // <-- Must match DB
-    lastName?: string;
-
-@Column({ nullable: true }) // Must be nullable because Mentors/HR won't have one
-    githubUsername?: string;
-
-  @Column({ type: 'enum', enum: UserRole, default: UserRole.INTERN }) // Use 'enum' type
+  @Column({ type: 'enum', enum: UserRole, default: UserRole.INTERN })
   role!: UserRole;
 
-  @OneToMany(() => Evaluation, (evaluation) => evaluation.intern)
+  // --- Relations (Inverse sides) ---
+  @OneToMany(() => Evaluation, evaluation => evaluation.intern)
   receivedEvaluations!: Evaluation[];
 
-  @OneToMany(() => Evaluation, (evaluation) => evaluation.mentor)
+  @OneToMany(() => Evaluation, evaluation => evaluation.mentor)
   givenEvaluations!: Evaluation[];
 
-  @OneToMany(() => Checklist, checklist => checklist.user) 
-  checklists!: Checklist[];
-
-  @OneToMany(() => Project, project => project.mentor)
-  mentoredProjects!: Project[];
-
-  @ManyToMany(() => Project, project => project.interns) // If using ManyToMany interns on Project
-  projectsAsIntern!: Project[];
-
-  @OneToMany(() => Project, project => project.intern)
-  assignedProjects!: Project[]; // Note: Usually an intern has one project, check your logic/relation type
-
-  @OneToMany(() => Task, task => task.assignee) // Assuming Task uses 'assignee'
-  assignedTasks!: Task[];
-
-  @OneToMany(() => InternChecklist, (checklist) => checklist.intern)
+  @OneToMany(() => InternChecklist, internChecklist => internChecklist.intern)
   internChecklists!: InternChecklist[];
 
-@OneToMany(() => GitHubMetrics, metrics => metrics.intern)
-    githubMetrics!: GitHubMetrics[];
+  // CRITICAL FIX: Add this if the `Checklist` entity uses `user.checklists` as inverse.
+  @OneToMany(() => Checklist, checklist => checklist.user)
+  checklists!: Checklist[];
 
-  @CreateDateColumn()
-  createdAt!: Date;
+  @OneToMany(() => Project, project => project.mentor, { nullable: true })
+  mentoredProjects?: Project[];
 
-  @UpdateDateColumn()
-  updatedAt!: Date;
+  @OneToMany(() => Project, project => project.intern, { nullable: true })
+  assignedProjects?: Project[];
+
+  @OneToMany(() => Task, task => task.assignee)
+  assignedTasks!: Task[];
+
+  @OneToMany(() => GitHubMetrics, metrics => metrics.intern)
+  githubMetrics!: GitHubMetrics[];
+
+  @OneToMany(() => NlpSummary, summary => summary.intern)
+  nlpSummaries!: NlpSummary[];
+
+  @OneToMany(() => Session, session => session.user)
+  sessions!: Session[];
+
+  // --- Timestamps ---
+  @CreateDateColumn() createdAt!: Date;
+  @UpdateDateColumn() updatedAt!: Date;
 }

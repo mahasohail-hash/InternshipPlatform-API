@@ -17,6 +17,8 @@ export class CreateChecklistTemplateItemDto {
   @IsOptional()
  text?: string;
 
+   @IsString() @IsNotEmpty() name!: string;
+  @IsOptional() @IsString() description?: string;
   // --- THIS IS THE FIX ---
   // This tells NestJS to validate the nested array of items
   @IsArray()

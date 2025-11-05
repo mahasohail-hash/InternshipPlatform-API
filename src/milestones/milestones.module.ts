@@ -1,20 +1,22 @@
-// src/milestones/milestones.module.ts
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { MilestonesService } from './milestones.service';
 import { MilestonesController } from './milestones.controller';
 import { Milestone } from './entities/milestone.entity';
-import { ProjectsModule } from '../projects/projects.module'; // To verify project ownership
-import { UsersModule } from '../users/users.module'; // To verify mentor
+import { ProjectsModule } from '../projects/projects.module';
+import { UsersModule } from '../users/users.module';
+import { Project } from '../projects/entities/project.entity';
+import { Task } from '../projects/entities/task.entity'; // CRITICAL FIX: Import Task entity
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Milestone]),
-    ProjectsModule, // Import ProjectsModule to use ProjectsService
-    UsersModule,    // Import UsersModule to use UsersService (for mentor context)
+    // CRITICAL FIX: Add Task entity here so TaskRepository can be injected into MilestonesService
+    TypeOrmModule.forFeature([Milestone, Project, Task]),
+    forwardRef(() => ProjectsModule),
+    forwardRef(() => UsersModule),
   ],
   controllers: [MilestonesController],
   providers: [MilestonesService],
-  exports: [MilestonesService], // Export MilestonesService for TasksModule
+  exports: [MilestonesService],
 })
 export class MilestonesModule {}

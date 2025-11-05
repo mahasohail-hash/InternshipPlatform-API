@@ -1,54 +1,48 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  ManyToOne, 
-  CreateDateColumn,
-  UpdateDateColumn
-} from 'typeorm';
-// Correctly import User
-import { User } from '../../users/entities/users.entity'; // Adjust path if needed
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { User } from '../../users/entities/users.entity'; // CRITICAL FIX: Correct import path
+import { NlpSummary } from '../../analytics/entities/nlp-summary.entity'; // CRITICAL FIX: Correct import path
 
-// --- FIX: Add 'export' ---
 export enum EvaluationType {
-  WEEKLY = 'Weekly Note',
-  MIDPOINT = 'Midpoint Review',
-  FINAL = 'Final Review',
-  SELF = 'Self-Review',
+    WEEKLY = 'Weekly Note',
+    MIDPOINT = 'Midpoint Review',
+    FINAL = 'Final Review',
+    SELF = 'Self-Review',
 }
-// --- End Fix ---
 
 @Entity('evaluations')
 export class Evaluation {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
+    @PrimaryGeneratedColumn('uuid') id!: string;
 
-  @Column({
-    type: 'enum',
-    enum: EvaluationType,
-    nullable: false,
-  })
-  type!: EvaluationType;
+    // CRITICAL FIX: Ensure these are Column decorated and match DTO/logic
+    @Column({ type: 'int', nullable: true })
+    score?: number;
 
-  @Column({ type: 'int', nullable: false })
-  score!: number;
+    @Column({ type: 'text', nullable: false, default: '' }) // CRITICAL FIX: Made non-nullable with a default or ensure DTO always sends it
+    feedbackText!: string;
 
-  @Column({ type: 'text', nullable: false })
-  feedbackText!: string;
+    @Column({ type: 'enum', enum: EvaluationType, default: EvaluationType.WEEKLY, nullable: false })
+    type!: EvaluationType;
 
-  @Column({ type: 'boolean', default: false })
-  submitted!: boolean;
+    // --- Date Columns ---
+    @CreateDateColumn() createdAt!: Date;
+    @UpdateDateColumn() updatedAt!: Date;
+    // --------------------
 
-  @ManyToOne(() => User, user => user.receivedEvaluations, { nullable: false, onDelete: 'CASCADE' }) // Was evaluationsAsIntern
+    // --- Relationship Fields ---
+    @ManyToOne(() => User, user => user.receivedEvaluations, { onDelete: 'CASCADE', nullable: false }) // Evaluation must have an intern
     intern!: User;
 
-    @ManyToOne(() => User, user => user.givenEvaluations, { nullable: false, onDelete: 'SET NULL' }) // Was evaluationsAsMentor
-    mentor!: User;
+    @Column({ type: 'uuid', nullable: false }) // Explicit FK column for intern
+    internId!: string;
 
-  @CreateDateColumn()
-  createdAt!: Date;
+    @ManyToOne(() => User, user => user.givenEvaluations, { nullable: true, onDelete: 'SET NULL' }) // Mentor is nullable for self-reviews
+    mentor?: User;
 
-  @UpdateDateColumn()
-  updatedAt!: Date;
+    @Column({ type: 'uuid', nullable: true }) // Explicit FK column for mentor
+    mentorId?: string;
 
+    // One-to-one relationship for NLP Summary
+    @OneToOne(() => NlpSummary, nlpSummary => nlpSummary.evaluation, { nullable: true })
+    @JoinColumn() // This evaluation entity 'owns' the foreign key to nlpSummary
+    nlpSummary?: NlpSummary;
 }
