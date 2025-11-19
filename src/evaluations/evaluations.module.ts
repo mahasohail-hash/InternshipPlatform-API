@@ -10,7 +10,7 @@ import { UsersModule } from '../users/users.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { ProjectsModule } from '../projects/projects.module'; // CRITICAL FIX: Import ProjectsModule
 import { GithubModule } from '../github/github.module';
-
+import { Project } from '../projects/entities/project.entity';
 // --- Services ---
 import { EvaluationsService } from './evaluations.service';
 import { DraftingService } from '../ai/drafting.service'; // CRITICAL FIX: Import DraftingService
@@ -20,7 +20,7 @@ import { DraftingService } from '../ai/drafting.service'; // CRITICAL FIX: Impor
 @Module({
   imports: [
     ConfigModule, // Make ConfigService available
-    TypeOrmModule.forFeature([Evaluation, User]),
+    TypeOrmModule.forFeature([Evaluation, User, Project,]),
     GithubModule,
     forwardRef(() => AnalyticsModule), // Use forwardRef for potential circular dependency with Analytics
     forwardRef(() => UsersModule), // Use forwardRef for UsersModule
@@ -29,6 +29,7 @@ import { DraftingService } from '../ai/drafting.service'; // CRITICAL FIX: Impor
   controllers: [EvaluationsController],
   providers: [
     EvaluationsService,
+    
     DraftingService, // CRITICAL FIX: Provide DraftingService
     // If you need to explicitly provide a mock for LLM, uncomment this and ensure MockLlmService is defined
     // { provide: 'LLM_SERVICE', useClass: MockLlmService },

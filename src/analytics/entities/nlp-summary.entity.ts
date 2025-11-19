@@ -1,34 +1,43 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
-import { User } from '../../users/entities/users.entity'; // Link to Intern User
-import { Evaluation } from '../../evaluations/entities/evaluation.entity'; // Link to source Evaluation
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  ManyToOne,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  JoinColumn,
+} from 'typeorm';
+import { User } from '../../users/entities/users.entity';
+import { Evaluation } from '../../evaluations/entities/evaluation.entity';
 
 @Entity('nlp_summaries')
 export class NlpSummary {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
+  @PrimaryGeneratedColumn()
+  id!: number;
 
-  // Many-to-One: Many NLP summaries belong to one Intern (User)
-  @ManyToOne(() => User, user => user.nlpSummaries, { onDelete: 'CASCADE' })
+  // Relation to the User who is the intern (use your existing users table)
+
+  @ManyToOne(() => User, (user) => user.nlpSummaries)
+  @JoinColumn({ name: 'intern_id' })
   intern!: User;
 
-  // One-to-One: An NLP summary can be linked to a specific Evaluation (e.g., if we summarized one eval)
-  // Or it can be an overall aggregated summary of ALL feedback for an intern (evaluation: null).
-  @OneToOne(() => Evaluation, evalData => evalData.nlpSummary, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'evaluationId' }) // Specify the foreign key column name
-  evaluation?: Evaluation;
 
-  @Column({ type: 'uuid', nullable: true }) // Explicit foreign key column for evaluation
-  evaluationId?: string;
-  
-  @CreateDateColumn()
-  analysisDate!: Date; // When this summary was generated
+  // Optional relation to a specific Evaluation row (nullable)
+  @ManyToOne(() => Evaluation, (evaluation) => evaluation.id, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'evaluation_id' })
+  evaluation!: Evaluation | null;
 
-  @Column({ type: 'jsonb' }) // PostgreSQL's native JSON type to store structured NLP output
-  summaryJson!: {
-    sentimentScore: string; // e.g., 'Positive', 'Negative', 'Neutral', 'N/A'
-    keyThemes: string[];    // e.g., ['communication', 'problem-solving', 'code-quality']
-  };
+  // Flexible JSON column to store both compact and full analysis.
+  @Column({ type: 'json', nullable: true })
+  summaryJson!: any;
 
-  @UpdateDateColumn()
-  updatedAt!: Date; // To track when the summary was last updated
+  // When this analysis was performed (optional)
+  @Column({ type: 'timestamp', nullable: true })
+  analysisDate!: Date | null;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt!: Date;
 }

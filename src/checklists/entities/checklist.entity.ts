@@ -1,16 +1,9 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  ManyToOne,
-  OneToMany,
-  CreateDateColumn,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany, CreateDateColumn, JoinColumn } from 'typeorm';
 import { User } from '../../users/entities/users.entity';
 import { ChecklistTemplate } from './checklist-template.entity';
 import { ChecklistItem } from './checklist-item.entity';
 
-@Entity('checklists') // Renamed table to make it distinct from intern_checklists
+@Entity('checklists')
 export class Checklist {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -18,21 +11,26 @@ export class Checklist {
   @Column({ nullable: false })
   name!: string;
 
-  @CreateDateColumn()
+  @Column()
+  title!: string;
+
+  @Column()
+  userId!: string;
+
+  @ManyToOne(() => User, user => user.checklists)
+  @JoinColumn({ name: 'userId' })
+  user!: User;
+
+  @OneToMany(() => ChecklistItem, item => item.checklist)
+  items!: ChecklistItem[];
+
+  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt!: Date;
 
-  // CRITICAL FIX: The inverse side needs to exist on the User entity.
-  // Assuming `User.checklists` (a new property on User) for this.
-  @ManyToOne(() => User, (user) => user.checklists, { onDelete: 'CASCADE', nullable: false })
-  user!: User; // The user to whom this checklist instance is assigned.
-
-  @ManyToOne(
-    () => ChecklistTemplate,
-    (template) => template.checklistInstances,
-    { onDelete: 'SET NULL', nullable: true }
-  )
+  @ManyToOne(() => ChecklistTemplate, template => template.checklists, { nullable: false })
+  @JoinColumn({ name: 'templateId' })
   template!: ChecklistTemplate;
 
-  @OneToMany(() => ChecklistItem, (item) => item.checklist, { cascade: true, eager: true })
-  items!: ChecklistItem[];
+  @Column({ nullable: false })
+  templateId!: string;
 }

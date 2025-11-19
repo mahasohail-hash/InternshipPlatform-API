@@ -1,20 +1,25 @@
-import { Module, forwardRef } from '@nestjs/common'; // CRITICAL FIX: Add forwardRef
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { GitHubMetrics } from './entities/github-metrics.entity';
-import { User } from '../users/entities/users.entity'; // CRITICAL FIX: Correct import path
+import { User } from '../users/entities/users.entity';
 import { GithubService } from './github.service';
 import { GithubController } from './github.controller';
 import { ConfigModule } from '@nestjs/config';
-import { UsersModule } from '../users/users.module'; // CRITICAL FIX: Import UsersModule
+import { UsersModule } from '../users/users.module';
+import { HttpModule } from '@nestjs/axios';
+import { Intern } from '@/entities/intern.entity';
+import { InsightsModule } from '../insights/insights.module'; // Changed AnalyticsModule to InsightsModule as per your structure
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([GitHubMetrics, User]),
+    TypeOrmModule.forFeature([GitHubMetrics, Intern, User]),
     ConfigModule,
-    forwardRef(() => UsersModule), // CRITICAL FIX: Use forwardRef for UsersModule due to potential circular dependency
+    HttpModule,
+    forwardRef(() => UsersModule),
+    forwardRef(() => InsightsModule), // Use InsightsModule for the forwardRef
   ],
   providers: [GithubService],
   controllers: [GithubController],
-  exports: [GithubService], // Export so other modules (like Analytics) can inject it
+  exports: [GithubService],
 })
 export class GithubModule {}

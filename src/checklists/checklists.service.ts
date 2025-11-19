@@ -13,6 +13,9 @@ import { User } from '../users/entities/users.entity';
 
 @Injectable()
 export class ChecklistsService {
+  updateChecklistItemStatus(itemId: string, isCompleted: boolean) {
+    throw new Error('Method not implemented.');
+  }
   constructor(
     @InjectRepository(ChecklistTemplate)
     private templateRepository: Repository<ChecklistTemplate>,

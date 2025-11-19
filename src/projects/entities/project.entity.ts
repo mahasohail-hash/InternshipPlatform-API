@@ -39,6 +39,10 @@ status!: ProjectStatus;
    @Column({ type: 'uuid', nullable: true }) // Explicit FK column for mentor
 mentorId?: string;
 
+@Column({ default: false })
+isPrimary!: boolean;
+
+
     // --- Relationships ---
 
     // Mentor relationship (ManyToOne)

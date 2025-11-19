@@ -17,6 +17,8 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard'; // CRITICAL FIX: Ke
 import { RolesGuard } from './auth/guards/roles.guard';
 // --- Import Feature Modules ---
 import { UsersModule } from './users/users.module';
+import { InsightsModule } from './insights/insights.module';
+import { TimeseriesModule } from './timeseries/timeseries.module';
 import { AuthModule } from './auth/auth.module';
 import { ProjectsModule } from './projects/projects.module';
 import { EvaluationsModule } from './evaluations/evaluations.module';
@@ -26,6 +28,7 @@ import { GithubModule } from './github/github.module';
 import { ReportsModule } from './reports/reports.module';
 import { MockModule } from './mock/mock.module';
 import { TasksModule } from './tasks/tasks.module';
+import { NlpModule } from './nlp/nlp.module';
 import { MilestonesModule } from './milestones/milestones.module';
 // --- Import ALL Entities --- (CRITICAL FIX: Explicitly list all entities)
 import { User } from './users/entities/users.entity';
@@ -44,6 +47,9 @@ import { Checklist } from './checklists/entities/checklist.entity';
 import { ChecklistItem } from './checklists/entities/checklist-item.entity';
 // --- Root App Components ---
 import { AppController } from './app.controller';
+import { NlpController } from './nlp/nlp.controller';
+import { TimeseriesController } from './timeseries/timeseries.controller';
+import { InsightsController } from './insights/insights.controller';
 import { AuthController } from './controller/auth.controller'; // CRITICAL: Import AuthController
 import { UsersController } from './users/users.controller'; // CRITICAL: Import UsersController
 import { ProjectsController } from './projects/projects.controller'; // CRITICAL: Import ProjectsController
@@ -54,15 +60,24 @@ import { EvaluationsController } from './evaluations/evaluations.controller'; //
 import { AnalyticsController } from './analytics/analytics.controller'; // CRITICAL: Import AnalyticsController
 import { GithubController } from './github/github.controller'; // CRITICAL: Import GithubController
 import { ReportsController } from './reports/reports.controller'; // CRITICAL: Import ReportsController
+import * as Joi from 'joi';
 
 import { AppService } from './app.service';
 import { UserRole } from './common/enums/user-role.enum';
+import { CommitEntity } from './entities/commit.entity';
+import { RepoEntity } from './entities/repo.entity';
+import { Intern } from './entities/intern.entity';
+import { InternController } from './interns/intern.controller';
+import { InternService } from './interns/intern.service';
 
 const ENTITIES = [
   User,
   Project,
   Milestone,
   Task,
+  CommitEntity,
+  RepoEntity,
+  Intern,
   Evaluation,
   InternChecklist,
   InternChecklistItem,
@@ -73,17 +88,40 @@ const ENTITIES = [
   NlpSummary,
   Checklist,
   ChecklistItem,
+  InsightsModule,
+  TimeseriesModule
 ];
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath: ['.env.local', '.env'], // Load .env.local first, then .env
-    }),
+  ConfigModule.forRoot({
+  isGlobal: true,
+  envFilePath: ['.env.local', '.env'],
+  validationSchema: Joi.object({
+    DB_HOST: Joi.string().required(),
+    DB_PORT: Joi.number().required(),
+    DB_USERNAME: Joi.string().required(),
+    DB_PASSWORD: Joi.string().required(),
+    DB_DATABASE: Joi.string().required(),
+    DB_SYNCHRONIZE: Joi.string().valid('true', 'false').default('false'),
+    DB_LOGGING: Joi.string().valid('true', 'false').default('false'),
+    DB_SSL: Joi.string().valid('true', 'false').default('false'),
+
+    JWT_SECRET: Joi.string().required(),
+    JWT_EXPIRES_IN: Joi.string().default('7d'),
+
+    OPENAI_API_KEY: Joi.string().optional(),
+    GOOGLE_API_KEY: Joi.string().optional(),
+
+    AI_PROVIDER: Joi.string().valid('OPENAI', 'GOOGLE').required(),
+    USE_AI_MOCKS: Joi.boolean().default(false),
+  }),
+}),
 
     TypeOrmModule.forRootAsync({
-      imports: [ConfigModule],
+      imports: [ConfigModule,InsightsModule,GithubModule,
+    NlpModule,
+  TimeseriesModule],
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         type: 'postgres', // CRITICAL FIX: Hardcoded as postgres based on your setup
@@ -142,10 +180,13 @@ const ENTITIES = [
     GithubModule,
     ReportsModule,
     MockModule,
+    NlpModule,
+    TimeseriesModule,
+    InsightsModule,
     PassportModule,
-    MilestonesModule, // CRITICAL: Ensure MilestonesModule is imported
-    TasksModule, // CRITICAL: Ensure TasksModule is imported
-    TypeOrmModule.forFeature([User]),
+    MilestonesModule, 
+    TasksModule,
+    TypeOrmModule.forFeature([User,Intern]),
   ],
   controllers: [
     AppController,
@@ -159,10 +200,14 @@ const ENTITIES = [
     AnalyticsController,
     GithubController,
     ReportsController,
+    NlpController,
+    InternController,
+    InsightsController,
+    TimeseriesController
   ],
   providers: [
     // 1. Standard class provider (AppService)
-    AppService,
+    AppService,InternService,
 
     // 2. CRITICAL FIX: Register JwtAuthGuard as global guard FIRST (must run before RolesGuard)
     {

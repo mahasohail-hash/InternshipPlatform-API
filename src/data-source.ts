@@ -15,6 +15,7 @@ export const AppDataSource = new DataSource({
   username: configService.get<string>('DB_USERNAME'),
   password: configService.get<string>('DB_PASSWORD'),
   database: configService.get<string>('DB_DATABASE'),
+   synchronize: false,
   entities: [User], // List entities to include in migration
   migrations: [__dirname + '/migrations/*.ts'], // Location of migration files
 });

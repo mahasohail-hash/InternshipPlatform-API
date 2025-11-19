@@ -11,24 +11,27 @@ import { InternChecklist } from '../checklists/entities/intern-checklist.entity'
 import { GitHubMetrics } from '../github/entities/github-metrics.entity';
 import { NlpSummary } from './entities/nlp-summary.entity';
 import { Task } from '../projects/entities/task.entity'; // CRITICAL FIX: Import Task for task analytics
-
+import { HttpModule } from '@nestjs/axios';
 // --- Modules ---
 import { GithubModule } from '../github/github.module';
 import { EvaluationsModule } from '../evaluations/evaluations.module';
 import { UsersModule } from '../users/users.module'; // CRITICAL FIX: Import UsersModule
-
+import { GithubService } from '../github/github.service';
+import { Intern } from '@/entities/intern.entity';
 @Module({
   imports: [
     TypeOrmModule.forFeature([
-      User, NlpSummary, Project, Evaluation, InternChecklist, GitHubMetrics, Task // CRITICAL FIX: Add Task entity
+      User, NlpSummary,Intern, GitHubMetrics,  Project, Evaluation, InternChecklist, GitHubMetrics, Task // CRITICAL FIX: Add Task entity
     ]),
     GithubModule,
+       HttpModule, 
     forwardRef(() => EvaluationsModule), // Use forwardRef for potential circular dependencies
     forwardRef(() => UsersModule), // CRITICAL FIX: Add UsersModule
   ],
   controllers: [AnalyticsController],
   providers: [
     AnalyticsService,
+    GithubService,
     // AnalyticsService depends on GithubService and others, which are provided by their modules
   ],
   exports: [

@@ -1,12 +1,13 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateUserDto } from './create-user.dto'; // CRITICAL FIX: Correct import path
-import { IsOptional, IsString, IsEmail, MinLength, IsEnum } from 'class-validator';
+import { IsOptional, IsString, IsEmail, MinLength, IsEnum, Length, Matches } from 'class-validator';
 import { UserRole } from '../../common/enums/user-role.enum'; // CRITICAL FIX: Correct import path
 
 export class UpdateUserDto extends PartialType(CreateUserDto) {
   // Overriding 'password' to allow it to be updated separately (e.g., via settings)
   // But `ChangePasswordDto` is preferred for password changes.
   @IsOptional()
+
   @IsString({ message: 'Password must be a string.' })
   @MinLength(8, { message: 'Password must be at least 8 characters long.' })
   password?: string;
@@ -31,7 +32,8 @@ export class UpdateUserDto extends PartialType(CreateUserDto) {
   @IsString({ message: 'Phone number must be a string.' })
   phone?: string;
 
-  @IsOptional()
-  @IsString({ message: 'GitHub username must be a string.' })
-  githubUsername?: string;
+   @IsString()
+  @Length(1, 39)
+  @Matches(/^[A-Za-z0-9-]+$/, { message: 'Invalid GitHub username format' })
+  githubUsername!: string;
 }

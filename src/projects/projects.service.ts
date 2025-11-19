@@ -25,8 +25,11 @@ import { UpdateMilestoneDto } from '../milestones/dto/update-milestone.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 
 
+
+
 @Injectable()
 export class ProjectsService {
+
     constructor(
         @InjectRepository(Task) private taskRepository: Repository<Task>,
         @InjectRepository(User) private userRepository: Repository<User>,
@@ -35,16 +38,33 @@ export class ProjectsService {
         private readonly entityManager: EntityManager,
     ) {}
 
-    async isMentorAssignedToIntern(mentorId: string, internId: string): Promise<boolean> {
-        const project = await this.projectRepository.findOne({
-            where: {
-                mentor: { id: mentorId },
-                intern: { id: internId }
-            },
-            select: ['id']
-        });
-        return !!project;
-    }
+    async findPrimaryProjectForIntern(internId: string): Promise<ProjectDetailsDto | null> {
+  const project = await this.projectRepository.findOne({
+    where: {
+      intern: { id: internId },  // OR assignedInterns depending on your schema
+      isPrimary: true,
+    },
+    relations: ['mentor', 'milestones', 'milestones.tasks'],
+  });
+
+  return project ?? null;
+}
+
+
+async isMentorAssignedToIntern(mentorId: string, internId: string): Promise<boolean> {
+  const project = await this.projectRepository
+    .createQueryBuilder('project')
+    .leftJoin('project.intern', 'intern')
+    .leftJoin('project.mentor', 'mentor')
+    .where('intern.id = :internId', { internId })
+    .andWhere('mentor.id = :mentorId', { mentorId })
+    .getOne();
+
+  return !!project;
+}
+
+
+
 
     async getMentoredInternsIds(mentorId: string): Promise<string[]> {
         const projects = await this.projectRepository.find({
@@ -95,7 +115,6 @@ export class ProjectsService {
             for (const milestoneDto of dto.milestones || []) {
                 const newMilestone = transactionalEntityManager.create(Milestone, {
                     title: milestoneDto.title,
-                   // description: milestoneDto.description,
                     dueDate: milestoneDto.dueDate ? new Date(milestoneDto.dueDate) : undefined,
                     projectId: savedProject.id,
                     project: savedProject,
@@ -424,6 +443,8 @@ const incomingMilestoneIds = (dto.milestones as UpdateMilestoneDto[]).map(m => m
         });
     }
 
+    
+
     async updateTaskStatus(
         taskId: string,
         newStatus: TaskStatus,
@@ -454,6 +475,12 @@ const incomingMilestoneIds = (dto.milestones as UpdateMilestoneDto[]).map(m => m
     }
 }
 
-function mapUserBasic(intern: User | null | undefined): UserBasicDto | null | undefined {
-  throw new Error('Function not implemented.');
+function mapUserBasic(user: User | null | undefined): UserBasicDto | null {
+    if (!user) return null;
+    return {
+        id: user.id,
+        firstName: user.firstName || 'N/A', 
+        lastName: user.lastName || 'N/A',
+        email: user.email, 
+    } as UserBasicDto;
 }

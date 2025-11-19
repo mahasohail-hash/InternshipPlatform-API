@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Res, UseGuards, UnauthorizedException, NotFoundException, InternalServerErrorException, ParseUUIDPipe, ForbiddenException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Param, Res, UseGuards, UnauthorizedException, NotFoundException, InternalServerErrorException, ParseUUIDPipe, ForbiddenException, HttpStatus, Req } from '@nestjs/common';
 import { Response } from 'express';
 import { ReportsService } from './reports.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -16,28 +16,35 @@ export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   // GET /api/reports/final-packet/:internId - Generate and download a final PDF packet for an intern
-  @Get('final-packet/:internId')
-  @Roles(UserRole.MENTOR, UserRole.HR) // Only Mentors and HR can generate these reports
-  async generateFinalPacket(
-    @Param('internId', ParseUUIDPipe) internId: string, // Validate internId is UUID
-    @Res() res: Response, // Use Nest's @Res decorator
-    @CurrentUser() user: JwtPayloadUser // Get current user for authorization
-  ) {
-    try {
-      // Service handles authorization (mentor must mentor the intern, HR can view all)
-      const pdfBuffer = await this.reportsService.generateInternFinalPacketPdf(internId, user.id, user.role);
+ @Get('final-packet/:internId')
+@Roles(UserRole.MENTOR, UserRole.HR)
+async generateFinalPacket(
+  @Param('internId', ParseUUIDPipe) internId: string,
+  @CurrentUser() user: { id: string; role: UserRole },
+  @Res() res: Response,
+) {
+  try {
+    const pdfBuffer = await this.reportsService.generateInternFinalPacketPdf(
+      internId,
+      user.id,
+      user.role,
+    );
 
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="intern_final_packet_${internId}.pdf"`);
-      res.send(pdfBuffer);
-    } catch (error: any) {
-      console.error(`Error generating PDF for intern ${internId} by user ${user.id} (${user.role}):`, error);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="intern_final_packet_${internId}.pdf"`,
+    );
 
-      if (error instanceof NotFoundException || error instanceof UnauthorizedException || error instanceof ForbiddenException) {
-        res.status(error.getStatus()).json({ statusCode: error.getStatus(), message: error.message });
-      } else {
-        res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({ statusCode: HttpStatus.INTERNAL_SERVER_ERROR, message: 'Failed to generate PDF report due to an internal server error.' });
-      }
-    }
-  }
+    return res.end(pdfBuffer); // IMPORTANT: do NOT use res.send()
+  } catch (error) {
+  const err = error as Error;
+
+  return res.status(500).json({
+    message: 'Failed to generate PDF.',
+    error: err.message,
+  });
+}
+
+}
 }

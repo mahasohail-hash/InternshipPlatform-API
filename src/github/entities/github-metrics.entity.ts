@@ -1,27 +1,54 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn, UpdateDateColumn } from 'typeorm';
-import { User } from '../../users/entities/users.entity'; // CRITICAL FIX: Correct import path
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  CreateDateColumn,
+  JoinColumn,
+} from 'typeorm';
+import { Intern } from '@/entities/intern.entity';
+import { User } from '@/users/entities/users.entity';
 
 @Entity('github_metrics')
 export class GitHubMetrics {
-  @PrimaryGeneratedColumn('uuid') id!: string;
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
 
-  @ManyToOne(() => User, user => user.githubMetrics, { onDelete: 'CASCADE', nullable: false }) // Must be linked to an intern
-  intern!: User;
+  @ManyToOne(() => User, (user) => user.githubMetrics, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'user_id' })
+  user?: User;
 
-  @Column({ type: 'uuid', nullable: false }) // Explicit FK column for intern
-  internId!: string;
+  @ManyToOne(() => Intern, (intern) => intern.githubMetrics, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'intern_id' })
+  intern?: Intern | null;
 
-  @Column() githubUsername!: string;
-  @Column() repoName!: string;
+  @Column({ name: 'intern_id', type: 'uuid', nullable: true })
+  internId?: string | null;
 
-  @CreateDateColumn({ type: 'date' }) fetchDate!: Date; // Using CreateDateColumn for initial fetch date
+  @Column()
+  githubUsername!: string;
 
-  @Column({ default: 0 }) commits!: number;
-  @Column({ default: 0 }) additions!: number;
-  @Column({ default: 0 }) deletions!: number;
+  @Column()
+  repoName!: string;
+
+  @Column({ type: 'date' })
+  fetchDate!: Date;
+
+  @Column({ type: 'int', default: 0 })
+  commits!: number;
+
+  @Column({ type: 'int', default: 0 })
+  additions!: number;
+
+  @Column({ type: 'int', default: 0 })
+  deletions!: number;
 
   @Column({ type: 'jsonb', nullable: true })
-  rawContributions?: any; // To store raw API response if needed
+  rawContributions?: any;
 
-  @UpdateDateColumn() updatedAt!: Date; // To track when the metrics were last updated
+  @CreateDateColumn()
+  createdAt!: Date;
 }

@@ -7,7 +7,8 @@ import { AnalyticsService } from '../analytics/analytics.service'; // CRITICAL F
 import { Evaluation, EvaluationType } from '../evaluations/entities/evaluation.entity';
 import { ProjectDetailsDto } from '../projects/dto/project-details.dto';
 import { UserRole } from '@/common/enums/user-role.enum';
-import { pdfMake } from '../common/pdf/pdfmake.util';
+import PdfPrinter from 'pdfmake';
+import { TDocumentDefinitions } from 'pdfmake/interfaces';
 
 @Injectable()
 export class ReportsService {
@@ -25,15 +26,10 @@ export class ReportsService {
       throw new NotFoundException(`Intern with ID "${internId}" not found or is not an INTERN.`);
     }
 
-    // Authorization Check
-    if (requesterRole === UserRole.MENTOR) {
-        const isMentorForIntern = await this.projectsService.isMentorAssignedToIntern(requesterId, internId);
-        if (!isMentorForIntern) {
-            throw new ForbiddenException('You are not authorized to generate reports for this intern.');
-        }
-    } else if (requesterRole !== UserRole.HR) {
-        throw new UnauthorizedException('You do not have permission to generate this report.');
-    }
+  if (requesterRole !== UserRole.HR && requesterRole !== UserRole.MENTOR) {
+  throw new UnauthorizedException('You do not have permission to generate this report.');
+}
+
 
     // 1. Gather all necessary data
     const internProfile = intern;
@@ -42,7 +38,13 @@ export class ReportsService {
 
     // CRITICAL FIX: Find the project the intern is primarily assigned to
     const allProjects = await this.projectsService.findAllWithDetails(); // Get all projects with details
-    const assignedProject: ProjectDetailsDto | undefined = allProjects.find(p => p.intern?.id === internId);
+
+const assignedProject = await this.projectsService.findPrimaryProjectForIntern(internId);
+
+if (!assignedProject || assignedProject.mentor?.id !== requesterId) {
+  throw new ForbiddenException('You are not authorized to generate reports for this intern.');
+}
+
 
 
     // 2. Prepare content for PDF
@@ -117,27 +119,50 @@ export class ReportsService {
 
 
     // 3. Define PDF document structure
-    const docDefinition = {
-      content: content,
-      styles: {
-        header: { fontSize: 24, bold: true, margin: [0, 0, 0, 10], color: '#333333' },
-        subheader: { fontSize: 18, bold: true, margin: [0, 15, 0, 5], color: '#555555' },
-        defaultStyle: { fontSize: 10 },
-      },
-      pageMargins: [40, 40, 40, 40],
-    };
+   const docDefinition: TDocumentDefinitions = {
+  content,
+  styles: {
+    header: {
+      fontSize: 24,
+      bold: true,
+      margin: [0, 0, 0, 10],
+      color: '#333333',
+    },
+    subheader: {
+      fontSize: 18,
+      bold: true,
+      margin: [0, 15, 0, 5],
+      color: '#555555',
+    },
+    defaultStyle: {
+      fontSize: 10,
+    },
+  },
+  pageMargins: [40, 40, 40, 40] as [number, number, number, number],
+};
 
-    // 4. Generate PDF
-    try {
-      return new Promise((resolve, reject) => {
-        const pdfDoc = pdfMake.createPdf(docDefinition);
-        pdfDoc.getBuffer((buffer: Buffer) => {
-          resolve(buffer);
-        });
-      });
-    } catch (pdfError: any) {
-      console.error("PDF generation failed:", pdfError);
-      throw new InternalServerErrorException('Failed to generate PDF document.');
-    }
-  }
+const fonts = {
+  Roboto: {
+    normal: `${process.cwd()}/src/common/pdf/fonts/Roboto-Regular.ttf`,
+    bold: `${process.cwd()}/src/common/pdf/fonts/Roboto-Bold.ttf`,
+    italics: `${process.cwd()}/src/common/pdf/fonts/Roboto-Medium.ttf`,
+    bolditalics: `${process.cwd()}/src/common/pdf/fonts/Roboto-Medium.ttf`,
+  },
+};
+
+const printer = new PdfPrinter(fonts);
+const pdfDoc = printer.createPdfKitDocument(docDefinition);
+  return await new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+
+    pdfDoc.on('data', (chunk: Buffer) => chunks.push(chunk));
+    pdfDoc.on('end', () => resolve(Buffer.concat(chunks)));
+    pdfDoc.on('error', (err) => reject(err));
+
+    pdfDoc.end();
+  });
+} catch (err: any) {
+  console.error('PDF generation failed:', err.stack || err.message || err);
+  throw new InternalServerErrorException('Failed to generate PDF document.');
 }
+  }

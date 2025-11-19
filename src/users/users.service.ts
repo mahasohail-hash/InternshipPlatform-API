@@ -18,6 +18,10 @@ import { InternUserDto } from './dto/intern-user.dto';
 
 @Injectable()
 export class UsersService {
+    usersRepo: any;
+    findById(mentorId: string) {
+      throw new Error('Method not implemented.');
+    }
     constructor(
         @InjectRepository(User)
         private readonly usersRepository: Repository<User>,
@@ -276,4 +280,12 @@ export class UsersService {
         const count = await this.usersRepository.count();
         return count > 0;
     }
+    
+     async updateGithubUsername(id: string, githubUsername: string | null) {
+    const user = await this.usersRepo.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('User not found');
+    user.githubUsername = githubUsername || null;
+    return this.usersRepo.save(user);
+  }
+  
 }

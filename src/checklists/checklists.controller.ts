@@ -11,6 +11,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser } from "../auth/decorators/current-user.decorator"; // CRITICAL FIX: Standard import
 import { JwtPayload } from '../auth/jwt-payload.interface';
 import { Public } from '@/auth/decorators/public.decorator';
+
 interface AuthenticatedUserPayload extends JwtPayload {
     id: string;
     role: UserRole;

@@ -1,122 +1,158 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+  Logger,
+  UseGuards,
+} from '@nestjs/common';
+import OpenAI from 'openai';
+import { AnalyticsService } from '../analytics/analytics.service';
 import { ConfigService } from '@nestjs/config';
-import { GoogleGenerativeAI } from '@google/generative-ai'; // CRITICAL FIX: Import GoogleGenerativeAI
-import { GithubService } from '../github/github.service';
+import { ProjectsService } from '../projects/projects.service';
 import { UsersService } from '../users/users.service';
-import { EvaluationType } from '../evaluations/entities/evaluation.entity'; // Import EvaluationType for consistent drafting
-import { TaskStatus } from '../projects/entities/task.entity'; // Import TaskStatus
-import { AnalyticsService } from '../analytics/analytics.service'; // CRITICAL FIX: Use AnalyticsService for gathering insights
+import { UserRole } from '../common/enums/user-role.enum';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { RolesGuard } from '@/auth/guards/roles.guard';
+import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
 
 @Injectable()
+
 export class DraftingService {
-  private readonly genAI: GoogleGenerativeAI | undefined;
-  private readonly LLM_MODEL: string = 'gemini-pro'; // Recommended model for general text generation
-  private readonly USE_AI_MOCKS: boolean; // Flag to control mock usage
+  private readonly logger = new Logger(DraftingService.name);
+  private readonly openai: OpenAI | undefined ;
+  private readonly USE_AI_MOCKS: boolean;
+  googleAI: any;
 
   constructor(
-    private configService: ConfigService,
-    private githubService: GithubService,
-    private usersService: UsersService,
-    private analyticsService: AnalyticsService, // CRITICAL FIX: Inject AnalyticsService
+    private readonly analyticsService: AnalyticsService,
+    private readonly configService: ConfigService,
+    private readonly projectsService: ProjectsService,
+    private readonly usersService: UsersService,
   ) {
-    const googleApiKey = this.configService.get<string>('GOOGLE_AI_API_KEY');
-    this.USE_AI_MOCKS = this.configService.get<boolean>('USE_AI_MOCKS', false); // Default to false
+  const useMocks = this.configService.get<boolean>('USE_AI_MOCKS', false);
+ const provider = this.configService.get<string>('AI_PROVIDER');
+  this.USE_AI_MOCKS = this.configService.get<boolean>('USE_AI_MOCKS', false);
+  const openaiApiKey = this.configService.get<string>('OPENAI_API_KEY');
 
-    if (googleApiKey && !this.USE_AI_MOCKS) {
-      this.genAI = new GoogleGenerativeAI(googleApiKey);
-    } else {
-      console.warn("WARNING: Google AI API Key not configured or USE_AI_MOCKS is true. AI Drafting will return mock data.");
-      this.genAI = undefined; // Explicitly set to undefined if not initialized
-    }
+  if (provider === 'OPENAI' && !this.USE_AI_MOCKS) {
+    this.openai = new OpenAI({
+      apiKey: this.configService.get<string>('OPENAI_API_KEY'),
+    });
+    this.logger.log(`[DraftingService] Initialized OpenAI provider ✅`);
+  } else if (provider === 'GOOGLE' && !this.USE_AI_MOCKS) {
+   this.openai = new OpenAI({
+  apiKey: this.configService.get<string>('OPENAI_API_KEY')!,
+});
+this.logger.log(`[AI Setup] Provider: ${this.configService.get('AI_PROVIDER')}, UseMocks: ${this.USE_AI_MOCKS}, OpenAI Key: ${openaiApiKey ? '✅ loaded' : '❌ missing'}`);
+
+  if (openaiApiKey && !this.USE_AI_MOCKS) {
+    this.openai = new OpenAI({ apiKey: openaiApiKey });
+  } else {
+    this.logger.warn('[DraftingService] Using mock AI responses.');
   }
+  }
+}
+  async generateAiDraft(internId: string, mentorId: string): Promise<{ draft: string }> {
+    this.logger.log(`[DraftingService] Generating AI draft for intern ${internId}`);
 
-  async generatePerformanceReviewDraft(internId: string, mentorId: string): Promise<string> {
+    // 🧩 Fetch users
     const intern = await this.usersService.findOne(internId);
     const mentor = await this.usersService.findOne(mentorId);
 
-    if (!intern) {
-      throw new NotFoundException(`Intern with ID ${internId} not found.`);
-    }
-    if (!mentor) {
-      throw new NotFoundException(`Mentor with ID ${mentorId} not found.`);
-    }
+    if (!intern || intern.role !== UserRole.INTERN)
+      throw new NotFoundException(`Intern with ID "${internId}" not found or invalid role.`);
+    if (!mentor || mentor.role !== UserRole.MENTOR)
+      throw new NotFoundException(`Mentor with ID "${mentorId}" not found or invalid role.`);
 
-    // CRITICAL FIX: Gather all relevant insights using AnalyticsService
+    // 🧠 Fetch analytics
     const internInsights = await this.analyticsService.getInternInsights(internId);
+    const githubData = internInsights.github || {};
+    const nlpData = internInsights.nlp || {};
+    const taskData = internInsights.tasks || {};
 
-    const githubData = internInsights.github;
-    const nlpData = internInsights.nlp;
-    const taskData = internInsights.tasks;
+    const totalCommits = githubData.totalCommits ?? 0;
+    const totalAdditions = githubData.totalAdditions ?? 0;
+    const totalDeletions = githubData.totalDeletions ?? 0;
+    const taskCompletionRate = taskData?.completionRate
+      ? taskData.completionRate.toFixed(0)
+      : '0';
 
-    // Default values if data is missing
-    const totalCommits = githubData?.totalCommits || 0;
-    const totalAdditions = githubData?.totalAdditions || 0;
-    const totalDeletions = githubData?.totalDeletions || 0;
-    const taskCompletionRate = taskData?.completionRate?.toFixed(0) || '0';
-    const sentiment = nlpData?.sentimentScore || "Neutral";
-    const keyThemes = nlpData?.keyThemes?.join(', ') || "No specific themes identified.";
+    const sentiment =
+      nlpData?.sentimentScore && nlpData.sentimentScore !== 'N/A'
+        ? nlpData.sentimentScore
+        : 'Neutral';
 
-    // --- Prompt Engineering ---
+    const keyThemes =
+      Array.isArray(nlpData.keyThemes) && nlpData.keyThemes.length > 0
+        ? nlpData.keyThemes.join(', ')
+        : 'No specific themes identified.';
+
+    // 🧩 Graceful zero-data summary
+    const hasActivity =
+      totalCommits > 0 || totalAdditions > 0 || totalDeletions > 0 || taskCompletionRate !== '0';
+
+    const performanceSummary = hasActivity
+      ? `${intern.firstName} has made ${totalCommits} commits, with ${taskCompletionRate}% task completion. 
+        The overall feedback sentiment is ${sentiment}.`
+      : `${intern.firstName} has recently joined and is beginning to familiarize themselves with the workflow. 
+        Their mentor anticipates strong future contributions as they get more involved.`;
+
+    // 🧠 AI Prompt
     const prompt = `
-      You are an experienced HR professional drafting a performance review for an intern.
-      Draft a ${EvaluationType.MIDPOINT} review for intern ${intern.firstName} ${intern.lastName}.
-      This intern is mentored by ${mentor.firstName} ${mentor.lastName}.
+Write a professional intern performance review for ${intern.firstName} ${intern.lastName}, based on the following data:
+- Total commits: ${totalCommits}
+- Additions: ${totalAdditions}
+- Deletions: ${totalDeletions}
+- Task completion: ${taskCompletionRate}%
+- Sentiment: ${sentiment}
+- Key themes: ${keyThemes}
 
-      **Instructions for Review Draft:**
-      - **Tone:** Professional, encouraging, constructive.
-      - **Structure:** Start with a brief introduction, then cover strengths, areas for growth, and future recommendations. Conclude with an positive outlook statement.
-      - **Word Count:** Keep it concise, around 200-300 words.
-      - **Focus:** Highlight contributions and identify specific areas for improvement based on provided metrics.
+Summary context:
+${performanceSummary}
 
-      **Intern Data & Performance Metrics:**
-      - Intern Name: ${intern.firstName} ${intern.lastName}
-      - Total commits in monitored GitHub repositories: ${totalCommits}
-      - Total lines added in code: ${totalAdditions}
-      - Total lines deleted in code: ${totalDeletions}
-      - Overall task completion rate: ${taskCompletionRate}%
-      - Aggregated sentiment from previous feedback: ${sentiment}
-      - Key thematic areas from previous feedback: ${keyThemes}
-
-      Generate the draft review text.
+Tone: Supportive, encouraging, and written from a mentor's perspective.
+Length: 200–300 words.
     `;
 
-    console.log("[AI Drafting] Generated Prompt:\n", prompt);
+    this.logger.debug('[DraftingService] Prompt prepared:', prompt);
 
-    // --- LLM Call (Using Mock/Placeholder for now) ---
-    if (!this.genAI || this.USE_AI_MOCKS) {
-      console.warn("MOCK AI DRAFT: Google AI API Key is not set or mocks are enabled. Returning a mock draft.");
-      return `
-      [AI Generated Draft - MOCK]
-      Dear ${intern.firstName},
+    // 🧩 Mock Fallback (no AI key)
+    if (!this.openai || this.USE_AI_MOCKS) {
+      const mockDraft = `
+Dear ${intern.firstName},
 
-      This is your midpoint performance review, reflecting on your performance as an intern.
+This is your AI-generated performance summary. You've made ${totalCommits} commits, showing a ${taskCompletionRate}% task completion rate.
+Your current progress reflects steady engagement and potential for continued growth.
 
-      **Strengths:**
-      Your proactive engagement is commendable. GitHub records show approximately ${totalCommits} commits, with ${totalAdditions} lines added and ${totalDeletions} lines deleted, indicating active contribution to our codebase. Your task completion rate is ${taskCompletionRate}%, which is a strong indicator of your reliability and ability to meet deadlines. Feedback highlights a generally ${sentiment} sentiment, with themes such as ${keyThemes}.
+Keep up the positive attitude and collaborative spirit — your contributions will soon reflect in tangible results!
 
-      **Areas for Growth:**
-      Consider exploring deeper into project architecture to understand the broader impact of your code. Proactively seeking feedback on code quality and best practices could also accelerate your growth.
-
-      **Recommendations:**
-      Continue to build on your technical skills by taking on new challenges. We encourage you to engage more in team discussions and leverage mentorship opportunities to further develop your professional communication.
-
-      We look forward to your continued growth and contributions in the remainder of your internship.
-
-      Best regards,
-      ${mentor.firstName} ${mentor.lastName}
+Best regards,  
+${mentor.firstName} ${mentor.lastName}
       `;
+      return { draft: mockDraft };
     }
 
+    // 🧠 Actual OpenAI call
     try {
-      const model = this.genAI.getGenerativeModel({ model: this.LLM_MODEL });
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-      return text;
+      const response = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are a professional mentor writing a detailed and positive performance review for an intern.',
+          },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.7,
+      });
 
-    } catch (llmError: any) {
-      console.error("Error calling LLM provider:", llmError);
-      throw new InternalServerErrorException("Failed to generate AI draft due to LLM provider error.");
+      const text = response.choices?.[0]?.message?.content || '[No AI response generated]';
+      return { draft: text };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : JSON.stringify(err);
+      this.logger.error('[DraftingService] AI draft generation failed:', message);
+      throw new InternalServerErrorException(`AI Draft Generation failed: ${message}`);
     }
   }
 }

@@ -15,6 +15,7 @@ import { RequestWithUser } from '../auth/interfaces/request-with-user.interface'
 import { UserMinimalDto } from './dto/user-minimal.dto'; // Example DTO
 import { InternUserDto } from './dto/intern-user.dto'; // Example DTO for intern list
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { UpdateGithubDto } from './dto/update-github.dto';
 // Applying Guards at the class level
 @UseGuards(JwtAuthGuard, RolesGuard) // CRITICAL FIX: Apply JwtAuthGuard globally to the controller
 @Controller('users')
@@ -114,6 +115,16 @@ export class UsersController {
     async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
         await this.usersService.remove(id);
     }
+
+
+      @Patch(':id/github')
+  @Roles(UserRole.HR, UserRole.MENTOR) // OPTIONAL: adjust per your policies
+  async updateGithubUsername(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: UpdateGithubDto,
+  ) {
+return this.usersService.updateGithubUsername(id, body.githubUsername ?? null);
+  }
 
     // 7. Setup Initial User (Unprotected) - POST api/users/setup-initial-user
     // This endpoint must be public because it's used before any users exist.
