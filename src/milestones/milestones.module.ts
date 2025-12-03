@@ -3,15 +3,16 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MilestonesService } from './milestones.service';
 import { MilestonesController } from './milestones.controller';
 import { Milestone } from './entities/milestone.entity';
+import { Project } from '../projects/entities/project.entity';
+import { Task } from '../projects/entities/task.entity';
 import { ProjectsModule } from '../projects/projects.module';
 import { UsersModule } from '../users/users.module';
-import { Project } from '../projects/entities/project.entity';
-import { Task } from '../projects/entities/task.entity'; // CRITICAL FIX: Import Task entity
+import { User } from '../users/entities/users.entity'; // Add User entity to inject repository
 
 @Module({
   imports: [
-    // CRITICAL FIX: Add Task entity here so TaskRepository can be injected into MilestonesService
-    TypeOrmModule.forFeature([Milestone, Project, Task]),
+    // Entities required by MilestonesService
+    TypeOrmModule.forFeature([Milestone, Project, Task, User]),
     forwardRef(() => ProjectsModule),
     forwardRef(() => UsersModule),
   ],

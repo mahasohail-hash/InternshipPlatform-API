@@ -1,6 +1,5 @@
 import { IsString, IsNotEmpty, IsOptional, IsDateString, IsArray, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-// CRITICAL FIX: Correct the import path to be relative or use an alias like '@projects/dto/create-task.dto'
 import { CreateTaskDto } from '../../projects/dto/create-task.dto';
 
 export class CreateMilestoneDto {
@@ -16,7 +15,7 @@ export class CreateMilestoneDto {
   @IsOptional()
   dueDate?: string;
 
-  @IsArray()
+  @IsArray({ message: 'Tasks must be an array.' })
   @IsOptional()
   @ValidateNested({ each: true })
   @Type(() => CreateTaskDto)

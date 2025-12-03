@@ -10,7 +10,6 @@ import {
   UseGuards,
   ParseUUIDPipe,
   BadRequestException,
-  NotFoundException,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -23,18 +22,14 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { TaskStatus } from '../projects/entities/task.entity';
 
-// Secure controller using JWT and RolesGuard
 @UseGuards(AuthGuard('jwt'), RolesGuard)
-// CRITICAL FIX: Change to a specific base path.
-// This resolves ambiguity with other controllers that use '/projects'.
-// Tasks are usually under a project or milestone, so '/projects/tasks' makes sense.
 @Controller('projects/tasks')
 export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
-  // --- CREATE TASK (Nested under Milestone) ---
-  // POST /api/projects/tasks/milestones/:milestoneId/
-  @Post('milestones/:milestoneId') // Adjusted path relative to 'projects/tasks' base
+  // --- CREATE TASK ---
+  // POST /projects/tasks/milestones/:milestoneId
+  @Post('milestones/:milestoneId')
   @Roles(UserRole.MENTOR, UserRole.HR)
   @HttpCode(HttpStatus.CREATED)
   create(
@@ -44,39 +39,41 @@ export class TasksController {
     return this.tasksService.create(createTaskDto, milestoneId);
   }
 
-  // --- GET TASKS FOR MILESTONE ---
-  // GET /api/projects/tasks/milestones/:milestoneId
-  @Get('milestones/:milestoneId') // Adjusted path relative to 'projects/tasks' base
+  // --- GET TASKS FOR A SPECIFIC MILESTONE ---
+  // GET /projects/tasks/milestones/:milestoneId
+  @Get('milestones/:milestoneId')
   @Roles(UserRole.MENTOR, UserRole.HR, UserRole.INTERN)
   findAllByMilestone(@Param('milestoneId', ParseUUIDPipe) milestoneId: string) {
     return this.tasksService.findAllByMilestone(milestoneId);
   }
 
   // --- GET SINGLE TASK ---
-  // GET /api/projects/tasks/:id (This now directly maps to /api/projects/tasks/:id)
-  @Get(':id') // Adjusted path relative to 'projects/tasks' base
+  // GET /projects/tasks/:id
+  @Get(':id')
   @Roles(UserRole.MENTOR, UserRole.HR, UserRole.INTERN)
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.tasksService.findOne(id);
   }
 
   // --- UPDATE TASK ---
-  // PATCH /api/projects/tasks/:id
-  @Patch(':id') // Adjusted path relative to 'projects/tasks' base
+  // PATCH /projects/tasks/:id
+  @Patch(':id')
   @Roles(UserRole.MENTOR, UserRole.HR)
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateTaskDto: UpdateTaskDto,
   ) {
     if (updateTaskDto.status) {
-      throw new BadRequestException('Use the specific /status endpoint to update task status.');
+      throw new BadRequestException(
+        'Use the specific /status endpoint to update task status.',
+      );
     }
     return this.tasksService.update(id, updateTaskDto);
   }
 
-  // --- UPDATE TASK STATUS (Specific endpoint for Kanban/Interns) ---
-  // PATCH /api/projects/tasks/:id/status
-  @Patch(':id/status') // Adjusted path relative to 'projects/tasks' base
+  // --- UPDATE TASK STATUS ---
+  // PATCH /projects/tasks/:id/status
+  @Patch(':id/status')
   @Roles(UserRole.MENTOR, UserRole.HR, UserRole.INTERN)
   @HttpCode(HttpStatus.OK)
   updateStatus(
@@ -84,14 +81,18 @@ export class TasksController {
     @Body('status') status: TaskStatus,
   ) {
     if (!status || !Object.values(TaskStatus).includes(status)) {
-      throw new BadRequestException(`Invalid status value provided. Must be one of: ${Object.values(TaskStatus).join(', ')}`);
+      throw new BadRequestException(
+        `Invalid status value provided. Must be one of: ${Object.values(
+          TaskStatus,
+        ).join(', ')}`,
+      );
     }
     return this.tasksService.updateStatus(id, status);
   }
 
   // --- DELETE TASK ---
-  // DELETE /api/projects/tasks/:id
-  @Delete(':id') // Adjusted path relative to 'projects/tasks' base
+  // DELETE /projects/tasks/:id
+  @Delete(':id')
   @Roles(UserRole.MENTOR, UserRole.HR)
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {

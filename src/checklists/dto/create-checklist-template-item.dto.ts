@@ -1,28 +1,19 @@
-import {
-  IsString,
-  IsNotEmpty,
-  IsOptional,
-  IsArray,
-  ValidateNested, // <-- Must import
-} from 'class-validator';
-import { Type } from 'class-transformer'; 
-//import { CreateChecklistTemplateItemDto } from '../../checklists/dto/create-checklist-template-item.dto'; // <-- Must import the ITEM DTO
+import { IsString, IsNotEmpty, IsOptional, IsBoolean } from 'class-validator';
+
 export class CreateChecklistTemplateItemDto {
   @IsString()
   @IsNotEmpty()
-  title!: string;
+  title!: string; // Title of the checklist item
 
+  @IsOptional()
   @IsString()
-  @IsOptional()
- text?: string;
+  description?: string; // Optional description for the item
 
- 
-  // --- THIS IS THE FIX ---
-  // This tells NestJS to validate the nested array of items
-  @IsArray()
   @IsOptional()
-  @ValidateNested({ each: true })
-  @Type(() => CreateChecklistTemplateItemDto)
-  items?: CreateChecklistTemplateItemDto[];
-  
+  @IsBoolean()
+  required?: boolean; // Whether this item is required or optional
+
+  @IsOptional()
+  @IsString()
+  text?: string; // Optional text field for additional content or instructions
 }

@@ -1,29 +1,40 @@
-import { Injectable, NotFoundException } from '@nestjs/common'; 
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { User } from '../users/entities/users.entity';
 import { UsersService } from '../users/users.service';
 
+export type users = {
+  id: string;
+  email: string;
+  passwordHash: string;
+  firstName: string;
+  lastName: string;
+};
+
 @Injectable()
 export class CurrentUserService {
-constructor(private readonly usersService: UsersService) {}
+  constructor(private readonly usersService: UsersService) {}
 
- // This method handles the primary fetch for the currently logged-in user.
- async getCurrentUser(userId: string): Promise<User> {
-   const user = await this.usersService.findOne(userId);
-   if (!user) {
-       throw new NotFoundException(`User with ID "${userId}" not found.`);
-   }
-   return user;
- }
+  async getCurrentUser(id: string): Promise<User> {
+    const user = await this.usersService.findOneById(id);
+    if (!user) {
+      throw new NotFoundException(`User with ID "${id}" not found.`);
+    }
+    return user;
+  }
 
- async getUserProfileById(userId: string): Promise<User> {
-   // The call to findOne only accepts the userId (one argument)
-   return this.usersService.findOne(userId);  }
+  async getUserProfileById(id: string): Promise<User> {
+    const user = await this.usersService.findOneById(id);
+    if (!user) {
+      throw new NotFoundException(`User with ID "${id}" not found.`);
+    }
+    return user;
+  }
 
- async getUserWithRelations(userId: string): Promise<User> {
-   const user = await this.usersService.findOne(userId); 
-   if (!user) {
-       throw new NotFoundException(`User with ID "${userId}" not found.`);
-   }
-   return user;
- }
+  async getUserWithRelations(id: string): Promise<User> {
+    const user = await this.usersService.findOneById(id);
+    if (!user) {
+      throw new NotFoundException(`User with ID "${id}" not found.`);
+    }
+    return user;
+  }
 }

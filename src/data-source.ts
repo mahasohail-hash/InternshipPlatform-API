@@ -4,6 +4,7 @@ import { DataSource } from 'typeorm';
 import * as dotenv from 'dotenv';
 import { ConfigService } from '@nestjs/config';
 import { User } from './users/entities/users.entity'; 
+
 // This file is used by the TypeORM CLI for migrations
 const configService = new ConfigService();
 dotenv.config(); // Load environment variables

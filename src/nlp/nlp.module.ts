@@ -9,7 +9,7 @@ import { UsersModule } from '../users/users.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([NlpSummary]),
-    UsersModule, // <-- ADD THIS
+    UsersModule, 
   ],
   providers: [NlpService],
   exports: [NlpService]

@@ -1,3 +1,4 @@
+// src/main.ts
 import { NestFactory, HttpAdapterHost } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ConfigService } from '@nestjs/config';
@@ -7,6 +8,9 @@ import { ValidationPipe, INestApplication, Logger } from '@nestjs/common';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { CreateUserDto } from './users/dto/create-user.dto';
 import * as bcrypt from 'bcrypt';
+import session from 'express-session';
+import passport from 'passport';
+
 async function setupAndCreateDefaultUsers(app: INestApplication) {
   const logger = new Logger('DefaultUsersSetup');
   const usersService = app.get(UsersService);
@@ -25,124 +29,91 @@ async function setupAndCreateDefaultUsers(app: INestApplication) {
     try {
       const existingUser = await usersService.findOneByEmail(userData.email);
 
-      // CRITICAL FIX for bcrypt error: Only compare if passwordHash exists
-      if (existingUser && existingUser.passwordHash) {
-        const isPasswordMatch = await bcrypt.compare(userData.password, existingUser.passwordHash); // Compare plain with hashed
-        if (!isPasswordMatch || existingUser.role !== userData.role) {
-          await usersService._internal_forcePasswordReset(existingUser.id, userData.password, userData.role); // Use userData.password for reset
-          logger.warn(`Default user exists: ${userData.email}. Password forcibly reset and role updated to '${userData.role}'.`);
-        } else {
-          logger.log(`Default user exists: ${userData.email}. Password and role are up-to-date.`);
-        }
-      } else if (!existingUser) { // User does not exist, create new
-        await usersService.create(userData);
+      if (existingUser) {
+        await usersService.forcePasswordReset(existingUser.id, userData.password, userData.role!);
+        logger.warn(`Default user exists: ${userData.email}. Password and role forcibly reset.`);
+      } else {
+        await usersService.createUser(userData);
         logger.log(`Default user created: ${userData.email} with role '${userData.role}'.`);
-      } else { // User exists but passwordHash is null/undefined, force reset
-        await usersService._internal_forcePasswordReset(existingUser.id, userData.password, userData.role);
-        logger.warn(`Default user exists but had no passwordHash: ${userData.email}. Password forcibly reset and role updated to '${userData.role}'.`);
       }
     } catch (error) {
       logger.error(`Error during setup for ${userData.email}: ${error instanceof Error ? error.message : error}`);
     }
   }
+
   logger.log('Default users check/creation complete.');
 }
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-
   const logger = new Logger('Bootstrap');
 
-  // --- Global Configuration ---
+  // --- Global Pipes ---
   app.useGlobalPipes(new ValidationPipe({
-      transform: true,
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transformOptions: {
-          enableImplicitConversion: true,
-      },
+    transform: true,
+    whitelist: true,
+    forbidNonWhitelisted: true,
+    transformOptions: { enableImplicitConversion: true },
   }));
 
+  // --- Session & Passport ---
+  app.use(
+    session({
+      secret: 'H0LA7uaGUwf2Rg9F2gFVhBVeTI7Pt/pPMcK82/ZpbK8=',
+      resave: false,
+      saveUninitialized: false,
+      cookie: { maxAge: 3600000 },
+    }),
+  );
+
+  app.use(passport.initialize());
+
+  // --- Global Exception Filter ---
   const { httpAdapter } = app.get(HttpAdapterHost);
   app.useGlobalFilters(new AllExceptionsFilter(httpAdapter));
 
   // --- CORS ---
-  // CRITICAL FIX: Use a function for origin to match both localhost and 127.0.0.1
-  // CRITICAL FIX: AllowedHeaders to include all common ones, and wildcard for robustness
   app.enableCors({
     origin: (origin, callback) => {
       const allowedOrigins = [
-        process.env.FRONTEND_URL || 'http://localhost:3000', // Frontend default
-        'http://127.0.0.1:3000', // Frontend alternative
-        'http://localhost:3001', // Backend itself
-        'http://127.0.0.1:3001', // Backend alternative
+        process.env.FRONTEND_URL || 'http://localhost:3000',
+        'http://127.0.0.1:3000',
+        'http://localhost:3001',
+        'http://127.0.0.1:3001',
       ];
-      
-      // Normalize origins (remove trailing slashes and convert to lowercase for comparison)
-      const normalizeOrigin = (orig: string) => {
-        let normalized = orig.toLowerCase();
-        if (normalized.endsWith('/')) {
-          normalized = normalized.slice(0, -1);
-        }
-        return normalized;
-      };
-      
-      // Allow requests with no origin (like Postman, curl, mobile apps, or file://) for development
-      if (!origin) {
-        logger.log('CORS: Request with no origin header - allowing for development');
-        callback(null, true);
-        return;
-      }
-      
-      const normalizedOrigin = normalizeOrigin(origin);
-      const isAllowed = allowedOrigins.some(allowed => normalizeOrigin(allowed) === normalizedOrigin);
-      
-      if (isAllowed) {
-        logger.log(`CORS: Allowing request from origin: ${origin}`);
-        callback(null, true);
-      } else {
-        logger.error(`CORS: Blocked request from origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
-        callback(new Error(`Not allowed by CORS: ${origin}`));
-      }
+
+      if (!origin) return callback(null, true); // Postman, curl, mobile apps
+
+      const normalize = (url: string) => url.toLowerCase().replace(/\/$/, '');
+      const isAllowed = allowedOrigins.some(o => normalize(o) === normalize(origin));
+
+      if (isAllowed) callback(null, true);
+      else callback(new Error(`Not allowed by CORS: ${origin}`));
     },
     credentials: true,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-    // CRITICAL FIX: Allow all common headers for robustness - use array format for better compatibility
     allowedHeaders: [
-      'Content-Type',
-      'Accept',
-      'Authorization',
-      'Cache-Control',
-      'X-Requested-With',
-      'Origin',
-      'X-CSRF-Token',
-      'Referer',
-      'sec-ch-ua',
-      'sec-ch-ua-mobile',
-      'sec-ch-ua-platform',
-      'User-Agent',
-      'Accept-Language',
-      'Accept-Encoding',
-      'Expires', // CRITICAL: Frontend sends this header
+      'Content-Type', 'Accept', 'Authorization', 'Cache-Control', 'X-Requested-With',
+      'Origin', 'X-CSRF-Token', 'Referer', 'sec-ch-ua', 'sec-ch-ua-mobile',
+      'sec-ch-ua-platform', 'User-Agent', 'Accept-Language', 'Accept-Encoding', 'Expires'
     ],
-    exposedHeaders: ['Content-Disposition'], // For file downloads
-    preflightContinue: false, // Ensure preflight response is handled here
-    optionsSuccessStatus: 204, // Some browsers expect 204 for OPTIONS success
-    maxAge: 86400, // Cache preflight requests for 24 hours
+    exposedHeaders: ['Content-Disposition'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
+    maxAge: 86400,
   });
 
   // --- Global API Prefix ---
   app.setGlobalPrefix('api');
 
-  // --- Default User Setup ---
+  // --- Default Users ---
   await setupAndCreateDefaultUsers(app);
 
-  // --- Start Listening ---
+  // --- Start Server ---
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') || 3001;
   await app.listen(port);
   logger.log(`🚀 Application is running on: ${await app.getUrl()}`);
-
 }
 
 bootstrap();

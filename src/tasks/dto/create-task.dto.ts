@@ -4,40 +4,32 @@ import {
   IsOptional,
   IsDateString,
   IsUUID,
-  IsEnum, // Import IsEnum
+  IsEnum,
 } from 'class-validator';
-// --- FIX: Import TaskStatus from the Entity File ---
-import { TaskStatus } from '../../projects/entities/task.entity'; // Adjust path based on where TaskStatus is defined/exported
-// --- End Fix ---
+import { TaskStatus } from '../../projects/entities/task.entity'; // Ensure correct path
 
 export class CreateTaskDto {
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: 'Task title must be a string.' })
+  @IsNotEmpty({ message: 'Task title is required.' })
   title!: string;
 
-  @IsString()
+  @IsString({ message: 'Task description must be a string.' })
   @IsOptional()
   description?: string;
 
-  @IsDateString()
+  @IsDateString({}, { message: 'Due date must be a valid ISO 8601 date string.' })
   @IsOptional()
   dueDate?: string;
 
-  // --- FIX: Use consistent name ---
-  @IsUUID('4')
+  @IsUUID('4', { message: 'Assigned intern ID must be a valid UUID.' })
   @IsOptional()
-  assignedToInternId?: string; // Renamed from assigneeId
-  // ---
+  assignedToInternId?: string;
 
-  // --- FIX: Added Status ---
-  @IsEnum(TaskStatus)
-  @IsOptional() // Service will likely set default to TODO
+  @IsEnum(TaskStatus, { message: 'Status must be a valid TaskStatus.' })
+  @IsOptional() // Default will be set in service if not provided
   status?: TaskStatus;
-  // ---
 
-  // --- FIX: Added Milestone ID back (as optional) ---
-  @IsUUID('4')
-  @IsOptional() // Make optional as it's set by the controller/service context
+  @IsUUID('4', { message: 'Milestone ID must be a valid UUID.' })
+  @IsOptional() // Set by controller/service context
   milestoneId?: string;
-  // ---
 }

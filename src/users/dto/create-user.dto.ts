@@ -11,6 +11,12 @@ export class CreateUserDto {
   @IsNotEmpty({ message: 'Password is required.' })
   password!: string;
 
+
+     @IsString()
+  @IsOptional()
+  passwordHash?: string;
+
+  
   @IsString({ message: 'First name must be a string.' })
   @IsNotEmpty({ message: 'First name is required.' })
   firstName!: string;
@@ -26,4 +32,12 @@ export class CreateUserDto {
   @IsString({ message: 'GitHub username must be a string.' })
   @IsOptional() // GitHub username is optional for initial creation
   githubUsername?: string;
+
+    @IsString()
+  @IsOptional()
+  provider?: string;
+
+  @IsString()
+  @IsOptional()
+  providerId?: string;
 }

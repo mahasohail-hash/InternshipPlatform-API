@@ -56,8 +56,8 @@ this.logger.log(`[AI Setup] Provider: ${this.configService.get('AI_PROVIDER')}, 
     this.logger.log(`[DraftingService] Generating AI draft for intern ${internId}`);
 
     // 🧩 Fetch users
-    const intern = await this.usersService.findOne(internId);
-    const mentor = await this.usersService.findOne(mentorId);
+    const intern = await this.usersService.findOneById(internId);
+    const mentor = await this.usersService.findOneById(mentorId);
 
     if (!intern || intern.role !== UserRole.INTERN)
       throw new NotFoundException(`Intern with ID "${internId}" not found or invalid role.`);

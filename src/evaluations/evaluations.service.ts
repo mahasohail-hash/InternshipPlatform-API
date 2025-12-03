@@ -15,32 +15,31 @@ import { ProjectsService } from '../projects/projects.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ConfigService } from '@nestjs/config';
-import { Project } from '@/projects/entities/project.entity';
-import { DraftingService } from '@/ai/drafting.service';
+import { Project } from '../projects/entities/project.entity';
+import { DraftingService } from '../ai/drafting.service';
 
 @Injectable()
 export class EvaluationsService {
-
   private readonly genAI: GoogleGenerativeAI | undefined;
   private readonly LLM_MODEL = 'gemini-pro';
   private readonly USE_AI_MOCKS: boolean;
 
-constructor(
-  @InjectRepository(Evaluation)
-  private readonly evaluationRepository: Repository<Evaluation>,
+  constructor(
+    @InjectRepository(Evaluation)
+    private readonly evaluationRepository: Repository<Evaluation>,
 
-  @InjectRepository(User)
-  private readonly userRepository: Repository<User>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
 
-  private readonly draftingService: DraftingService,
+    private readonly draftingService: DraftingService,
 
-  @InjectRepository(Project)
-  private readonly projectRepository: Repository<Project>, // 👈 INDEX [3]
-  
-  private readonly projectsService: ProjectsService,
-  private readonly analyticsService: AnalyticsService,
-  private readonly configService: ConfigService,
-)  {
+    @InjectRepository(Project)
+    private readonly projectRepository: Repository<Project>,
+
+    private readonly projectsService: ProjectsService,
+    private readonly analyticsService: AnalyticsService,
+    private readonly configService: ConfigService,
+  ) {
     const googleApiKey = this.configService.get<string>('GOOGLE_AI_API_KEY');
     this.USE_AI_MOCKS = this.configService.get<boolean>('USE_AI_MOCKS', false);
     this.genAI =
@@ -49,7 +48,9 @@ constructor(
         : undefined;
   }
 
-  // ✅ 1. createEvaluation
+  // ==============================
+  // 1️⃣ Create Evaluation
+  // ==============================
   async createEvaluation(dto: CreateEvaluationDto, submitterId: string) {
     const intern = await this.userRepository.findOneBy({
       id: dto.internId,
@@ -71,22 +72,25 @@ constructor(
         intern.id,
       );
       if (!isMentorForIntern)
-        throw new ForbiddenException('You are not mentor of this intern');
+        throw new ForbiddenException('You are not the mentor of this intern');
     }
 
-   const evaluation = this.evaluationRepository.create({
-  feedbackText: dto.feedbackText,
-  type: dto.type,
-  intern,
-  internId: intern.id,
-  mentor: mentor ?? undefined,
-  mentorId: mentor?.id,
-});
+    const evaluation = this.evaluationRepository.create({
+      feedbackText: dto.feedbackText,
+      type: dto.type,
+      intern,
+      internId: intern.id,
+      mentor: mentor ?? undefined,
+      mentorId: mentor?.id,
+      score: dto.score,
+    });
 
     return this.evaluationRepository.save(evaluation);
   }
 
-  // ✅ 2. findAll
+  // ==============================
+  // 2️⃣ Find All Evaluations (with Role-based Access)
+  // ==============================
   async findAll(userId: string, role: UserRole, internId?: string) {
     const options: FindManyOptions<Evaluation> = {
       relations: ['intern', 'mentor'],
@@ -96,7 +100,6 @@ constructor(
     if (role === UserRole.INTERN) {
       options.where = { intern: { id: userId } };
     } else if (role === UserRole.MENTOR) {
-      // Get mentored intern ids
       const mentoredInternIds = await this.projectsService.getMentoredInternsIds(userId);
 
       if (internId && !mentoredInternIds.includes(internId)) {
@@ -104,7 +107,10 @@ constructor(
       }
 
       if (internId) {
-        options.where = [{ intern: { id: internId } }, { mentor: { id: userId } }];
+        options.where = [
+          { intern: { id: internId } },
+          { mentor: { id: userId } },
+        ];
       } else {
         options.where = [
           { mentor: { id: userId } },
@@ -112,60 +118,47 @@ constructor(
         ];
       }
     } else if (role === UserRole.HR) {
-      // HR can filter by intern
       if (internId) options.where = { intern: { id: internId } };
     } else {
-      // other roles: forbid
       throw new ForbiddenException('Not authorized to view evaluations');
     }
 
     return this.evaluationRepository.find(options);
   }
 
-  // ✅ 3. getEvaluationsForIntern
- async getEvaluationsForIntern(
-  internId: string,
-  requesterId: string,
-  requesterRole: UserRole,
-) {
-  // HR → unrestricted
-  if (requesterRole === UserRole.HR) {
-    return this.evaluationRepository.find({
-      where: { intern: { id: internId } },
-      relations: ['mentor', 'intern'],
-      order: { createdAt: 'DESC' },
-    });
-  }
-
-  // Intern → can only view their own evaluations
-  if (requesterRole === UserRole.INTERN) {
-    if (requesterId !== internId) {
-      throw new ForbiddenException('You cannot view evaluations of another intern');
+  // ==============================
+  // 3️⃣ Get Evaluations for a Specific Intern
+  // ==============================
+  async getEvaluationsForIntern(
+    internId: string,
+    requesterId: string,
+    requesterRole: UserRole,
+  ) {
+    if (requesterRole === UserRole.HR || requesterRole === UserRole.MENTOR) {
+      return this.evaluationRepository.find({
+        where: { intern: { id: internId } },
+        relations: ['mentor', 'intern'],
+        order: { createdAt: 'DESC' },
+      });
     }
 
-    return this.evaluationRepository.find({
-      where: { intern: { id: internId } },
-      relations: ['mentor', 'intern'],
-      order: { createdAt: 'DESC' },
-    });
+    if (requesterRole === UserRole.INTERN) {
+      if (requesterId !== internId)
+        throw new ForbiddenException('You cannot view evaluations of another intern');
+
+      return this.evaluationRepository.find({
+        where: { intern: { id: internId } },
+        relations: ['mentor', 'intern'],
+        order: { createdAt: 'DESC' },
+      });
+    }
+
+    throw new ForbiddenException('You are not allowed to view evaluations');
   }
 
-  // Mentor → 🔥 allowed to view ANY intern (your requirement)
-  if (requesterRole === UserRole.MENTOR) {
-    return this.evaluationRepository.find({
-      where: { intern: { id: internId } },
-      relations: ['mentor', 'intern'],
-      order: { createdAt: 'DESC' },
-    });
-  }
-
-  // Everyone else blocked
-  throw new ForbiddenException('You are not allowed to view evaluations');
-}
-
-
-
-  // ✅ 4. generateAiDraft
+  // ==============================
+  // 4️⃣ Generate AI Draft
+  // ==============================
   async generateAiDraft(internId: string, mentorId: string) {
     const intern = await this.userRepository.findOne({
       where: { id: internId, role: UserRole.INTERN },
@@ -177,7 +170,6 @@ constructor(
     if (!intern || !mentor)
       throw new NotFoundException('Intern or mentor not found');
 
-    // Ensure mentor is assigned to intern (safety)
     const isMentorAssigned = await this.projectsService.isMentorAssignedToIntern(
       mentorId,
       internId,
@@ -196,10 +188,11 @@ Sentiment: ${nlp?.sentimentScore ?? 'Neutral'}
 Themes: ${nlp?.keyThemes?.join(', ') ?? 'No themes.'}
 `;
 
-    // If AI not configured or using mock, return a deterministic mock
     if (!this.genAI || this.USE_AI_MOCKS) {
       return {
-        draft: `Dear ${intern.firstName}, this is a mock performance draft generated for testing. Key themes: ${(nlp?.keyThemes || []).slice(0,3).join(', ')}`,
+        draft: `Dear ${intern.firstName}, this is a mock performance draft generated for testing. Key themes: ${(nlp?.keyThemes || [])
+          .slice(0, 3)
+          .join(', ')}`,
       };
     }
 
@@ -213,6 +206,10 @@ Themes: ${nlp?.keyThemes?.join(', ') ?? 'No themes.'}
       throw new InternalServerErrorException('AI Draft Generation failed: ' + errorMessage);
     }
   }
+
+  // ==============================
+  // 5️⃣ Get Intern Evaluations (Helper)
+  // ==============================
   async getInternEvaluations(internId: string) {
     return this.evaluationRepository.find({
       where: { intern: { id: internId } },
@@ -221,5 +218,3 @@ Themes: ${nlp?.keyThemes?.join(', ') ?? 'No themes.'}
     });
   }
 }
-    
- 

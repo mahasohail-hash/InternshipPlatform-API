@@ -1,20 +1,27 @@
-// src/current-user/current-user.service.ts
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { User } from '../users/entities/users.entity';
 import { UsersService } from '../users/users.service';
+export type users =any;
 
 @Injectable()
 export class CurrentUserService {
   constructor(private readonly usersService: UsersService) {}
 
-  // userId type changed to string (UUID)
-  async getCurrentUser(userId: string): Promise<User | null> {
-    return this.usersService.findOne(userId); // Now uses the updated findOne in UsersService
+  async getCurrentUser(id: string): Promise<User> {
+    const user = await this.usersService.findOneById(id);
+    if (!user) throw new NotFoundException(`User with ID "${id}" not found.`);
+    return user;
   }
 
-  // userId type changed to string (UUID)
-  async getCurrentUserWithRelations(userId: string, relations: string[] = []): Promise<User | null> {
-    // UsersService.findOne now accepts relations
-    return this.usersService.findOne(userId);
+  async getUserProfileById(id: string): Promise<User> {
+    const user = await this.usersService.findOneById(id);
+    if (!user) throw new NotFoundException(`User with ID "${id}" not found.`);
+    return user;
+  }
+
+  async getUserWithRelations(id: string): Promise<User> {
+    const user = await this.usersService.findOneByIdWithRelations(id);
+    if (!user) throw new NotFoundException(`User with ID "${id}" not found.`);
+    return user;
   }
 }

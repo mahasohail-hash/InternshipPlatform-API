@@ -1,14 +1,22 @@
 import { Request } from 'express';
-import { UserRole } from '../../common/enums/user-role.enum'; // CRITICAL FIX: Correct import path
+import { UserRole } from '../../common/enums/user-role.enum';
 
-// Interface for the JWT payload that JwtAuthGuard attaches to `req.user`
-interface JwtPayload {
-    id: string; // CRITICAL FIX: User ID is a UUID (string)
+// This interface matches what JwtStrategy.validate() returns and is attached to req.user
+export interface JwtPayload {
+    sub: string;      
     email: string;
     role: UserRole;
+    firstName?: string;
+    lastName?: string;
 }
 
-// Interface for the Express Request object with the attached user payload
+// Express Request with attached user
 export interface RequestWithUser extends Request {
-    user: JwtPayload;
+    user: {
+        id: string;       
+        email: string;
+        role: UserRole;
+        firstName?: string;
+        lastName?: string;
+    };
 }

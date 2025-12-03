@@ -1,26 +1,34 @@
 import { MiddlewareConsumer, Module, NestModule, forwardRef } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { AuthController } from '../controller/auth.controller'; // CRITICAL FIX: Correct import path for AuthController
+import { AuthController } from './auth.controller'; // CRITICAL FIX: Correct import path for AuthController
 import { UsersModule } from '../users/users.module';
 import { PassportModule } from '@nestjs/passport';
 import { JwtModule, JwtModuleOptions } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { JwtStrategy } from './jwt.strategy'; // CRITICAL FIX: Correct import path for JwtStrategy
+import { JwtStrategy } from './strategies/jwt.strategy'; // CRITICAL FIX: Correct import path for JwtStrategy
 import { LocalStrategy } from './strategies/local.strategy'; // CRITICAL FIX: Correct import path for LocalStrategy
+import { jwtConstants } from './constants';
+import { MailerModule } from '@/mailer/mailer.module';
+import { MailerService } from '@/mailer/mailer.service';
 
 @Module({
   imports: [
+        MailerModule,  
     forwardRef(() => UsersModule),
     PassportModule.register({ defaultStrategy: 'jwt' }),
+        PassportModule.register({ session: false }),
+
     ConfigModule,
     JwtModule.registerAsync({
+       global: true,
+      
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: async (
         configService: ConfigService,
       ): Promise<JwtModuleOptions> => {
         const secretKey = configService.get<string>('JWT_SECRET');
-        const expiresInValue = configService.get<string>('JWT_EXPIRES_IN') || '7d';
+        const expiresInValue = configService.get<string>('JWT_EXPIRES_IN') || '30d';
 
         if (!secretKey) {
              console.warn('WARNING: JWT_SECRET environment variable is missing. Using a fallback.');
@@ -40,12 +48,14 @@ import { LocalStrategy } from './strategies/local.strategy'; // CRITICAL FIX: Co
     AuthService,
     LocalStrategy,
     JwtStrategy,
+    MailerService
   ],
   exports: [
     AuthService,
     JwtStrategy,
     PassportModule,
     JwtModule,
+    
   ],
 })
 export class AuthModule implements NestModule {

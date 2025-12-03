@@ -1,26 +1,21 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TasksService } from './tasks.service';
 import { TasksController } from './tasks.controller';
 import { Task } from '../projects/entities/task.entity';
-import { Milestone } from '../projects/entities/milestone.entity'; // Adjust path if needed
-// --- FIX 1: Correct Import Path for User Entity ---
-import { User } from '../users/entities/users.entity'; // Changed from 'users.entity'
-// --- End Fix ---
-// --- FIX 2: Import UsersModule as a dependency ---
+import { Milestone } from '../projects/entities/milestone.entity';
+import { User } from '../users/entities/users.entity';
 import { UsersModule } from '../users/users.module';
+import { ProjectsModule } from '../projects/projects.module'; // Optional, if you need cross-module injection
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
-      Task,
-      Milestone,
-      User // Registering User is required for injection in the service/controller if used as a provider
-    ]),
-    UsersModule // <-- CRITICAL FIX: Provides UsersService dependency (for findOneByEmail, etc.)
+    TypeOrmModule.forFeature([Task, Milestone, User]),
+    forwardRef(() => UsersModule),
+    forwardRef(() => ProjectsModule), // Optional: for milestone/project cross-relations
   ],
   controllers: [TasksController],
   providers: [TasksService],
-  exports: [TasksService], // Export service for other modules (like ProjectsModule)
+  exports: [TasksService], // Exported for injection into other modules like ProjectsModule
 })
 export class TasksModule {}

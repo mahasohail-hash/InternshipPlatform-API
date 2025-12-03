@@ -1,74 +1,81 @@
 import { 
-    Entity, 
-    PrimaryGeneratedColumn, 
-    Column, 
-    ManyToOne, 
-    OneToMany, 
-    ManyToMany, 
-    JoinColumn, // CRITICAL FIX: Import JoinColumn
-    CreateDateColumn, // CRITICAL FIX: Import CreateDateColumn
-    UpdateDateColumn,
-    JoinTable 
+  Entity, 
+  PrimaryGeneratedColumn, 
+  Column, 
+  ManyToOne, 
+  OneToMany, 
+  ManyToMany, 
+  JoinColumn, 
+  JoinTable, 
+  CreateDateColumn, 
+  UpdateDateColumn 
 } from 'typeorm';
 import { User } from '../../users/entities/users.entity';
-import { Milestone } from './milestone.entity'; 
-import { UserRole } from '../../common/enums/user-role.enum'; // For potential enum mapping
+import { Milestone } from './milestone.entity';
+import { Task } from './task.entity';
+import { UserRole } from '../../common/enums/user-role.enum';
+
 export enum ProjectStatus {
-PLANNING = 'Planning',
-ACTIVE = 'Active',
-IN_PROGRESS = 'In Progress',
-COMPLETED = 'Completed',
-ON_HOLD = 'On Hold',
-BLOCKED = 'Blocked',
+  PLANNING = 'Planning',
+  ACTIVE = 'Active',
+  IN_PROGRESS = 'In Progress',
+  COMPLETED = 'Completed',
+  ON_HOLD = 'On Hold',
+  BLOCKED = 'Blocked',
 }
 
 @Entity('projects')
 export class Project {
-    @PrimaryGeneratedColumn('uuid') 
-    id!: string; 
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
 
-    @Column({ nullable: false }) // CRITICAL FIX: Ensure title is non-nullable
-title!: string;
+  @Column({ nullable: false })
+  title!: string;
 
-@Column({ type: 'enum', enum: ProjectStatus, default: ProjectStatus.PLANNING, nullable: false }) // CRITICAL FIX: Use ProjectStatus enum
-status!: ProjectStatus;
+  @Column({ type: 'enum', enum: ProjectStatus, default: ProjectStatus.PLANNING, nullable: false })
+  status!: ProjectStatus;
 
-    @Column({ nullable: true, type: 'text' }) 
-    description?: string; 
+  @Column({ type: 'text', nullable: true })
+  description?: string;
 
-   @Column({ type: 'uuid', nullable: true }) // Explicit FK column for mentor
-mentorId?: string;
+  @Column({ type: 'uuid', nullable: true })
+  mentorId?: string;
 
-@Column({ default: false })
-isPrimary!: boolean;
+  @ManyToOne(() => User, user => user.mentoredProjects, { onDelete: 'SET NULL', nullable: true, eager: true })
+  @JoinColumn({ name: 'mentorId' })
+  mentor?: User | null;
 
+  @Column({ type: 'uuid', nullable: true })
+  internId?: string;
 
-    // --- Relationships ---
+  @ManyToOne(() => User, user => user.assignedProjects, { onDelete: 'SET NULL', nullable: true, eager: true })
+  @JoinColumn({ name: 'internId' })
+  intern?: User | null;
 
-    // Mentor relationship (ManyToOne)
-    @ManyToOne(() => User, user => user.mentoredProjects, { onDelete: 'SET NULL', nullable: true }) // Added nullable: true
-    mentor?: User | null; // <-- Changed to optional
+  // Optional Many-to-Many relationship for multiple interns
+  @ManyToMany(() => User)
+  @JoinTable({
+    name: 'project_interns_user',
+    joinColumn: { name: 'projectId', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'userId', referencedColumnName: 'id' },
+  })
+  interns!: User[];
 
-    // Intern relationship (ManyToOne - assuming one main intern per project)
-  @ManyToOne(() => User, user => user.assignedProjects, { onDelete: 'SET NULL', nullable: true })
-@JoinColumn({ name: 'internId' }) // Specify the foreign key column name
-intern?: User | null; // <-- Changed to optional
-@Column({ type: 'uuid', nullable: true })
-    internId?: string | null;
-    // --- FIX #3: Kept ManyToMany for now, but review if you only need the ManyToOne 'intern' relationship ---
-    // Relation: A project can have multiple Interns (if needed)
-    @ManyToMany(() => User)
-    @JoinTable({
-        name: 'project_interns_user', // Optional: specify join table name
-        joinColumn: { name: 'projectId', referencedColumnName: 'id' },
-        inverseJoinColumn: { name: 'userId', referencedColumnName: 'id' },
+  @Column({ default: false })
+  isPrimary!: boolean;
+
+  // Milestones under this project
+  @OneToMany(() => Milestone, milestone => milestone.project, { cascade: true, eager: true })
+  milestones!: Milestone[];
+
+ @OneToMany(() => Task, task => task.project, {
+        eager: true, // Only one side is eager
     })
-    interns!: User[];
+    tasks!: Task[];
 
-    // Milestones relationship (OneToMany)
-    @OneToMany(() => Milestone, milestone => milestone.project, { cascade: true })
-    milestones!: Milestone[];
-@CreateDateColumn() createdAt!: Date;
-@UpdateDateColumn() updatedAt!: Date;
+  @CreateDateColumn()
+  createdAt!: Date;
 
+  @UpdateDateColumn()
+  updatedAt!: Date;
 }

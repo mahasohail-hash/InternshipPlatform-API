@@ -1,11 +1,10 @@
+// src/projects/projects.service.ts
 import { CreateProjectDto } from './dto/create-project.dto';
 import {
     Injectable,
     NotFoundException,
     UnauthorizedException,
     ConflictException,
-    InternalServerErrorException,
-    BadRequestException,
     ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -19,124 +18,103 @@ import { UserRole } from '../common/enums/user-role.enum';
 import { TaskCompletionDto } from './dto/task-completion.dto';
 import { UserBasicDto } from '../users/dto/user-basic.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
-import { CreateMilestoneDto } from './dto/create-milestone.dto';
-import { CreateTaskDto } from './dto/create-task.dto';
-import { UpdateMilestoneDto } from '../milestones/dto/update-milestone.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
-
-
-
+import { UpdateMilestoneDto } from '@/milestones/dto/update-milestone.dto';
 
 @Injectable()
 export class ProjectsService {
-
+    getTasksForIntern(internId: string) {
+      throw new Error('Method not implemented.');
+    }
     constructor(
-        @InjectRepository(Task) private taskRepository: Repository<Task>,
-        @InjectRepository(User) private userRepository: Repository<User>,
-        @InjectRepository(Project) private projectRepository: Repository<Project>,
-        @InjectRepository(Milestone) private milestoneRepository: Repository<Milestone>,
+        @InjectRepository(Task) private readonly taskRepository: Repository<Task>,
+        @InjectRepository(User) private readonly userRepository: Repository<User>,
+        @InjectRepository(Project) private readonly projectRepository: Repository<Project>,
+        @InjectRepository(Milestone) private readonly milestoneRepository: Repository<Milestone>,
         private readonly entityManager: EntityManager,
     ) {}
 
+    // --- Primary Project retrieval for Intern ---
     async findPrimaryProjectForIntern(internId: string): Promise<ProjectDetailsDto | null> {
-  const project = await this.projectRepository.findOne({
-    where: {
-      intern: { id: internId },  // OR assignedInterns depending on your schema
-      isPrimary: true,
-    },
-    relations: ['mentor', 'milestones', 'milestones.tasks'],
-  });
+        const project = await this.projectRepository.findOne({
+            where: {
+                intern: { id: internId },
+                isPrimary: true,
+            },
+            relations: ['mentor', 'intern', 'milestones', 'milestones.tasks', 'milestones.tasks.assignee'],
+        });
+        return project ? this.mapProjectDetails(project) : null;
+    }
 
-  return project ?? null;
-}
+    // --- Check if mentor is assigned to intern ---
+    async isMentorAssignedToIntern(mentorId: string, internId: string): Promise<boolean> {
+        const project = await this.projectRepository
+            .createQueryBuilder('project')
+            .leftJoin('project.intern', 'intern')
+            .leftJoin('project.mentor', 'mentor')
+            .where('intern.id = :internId', { internId })
+            .andWhere('mentor.id = :mentorId', { mentorId })
+            .getOne();
+        return !!project;
+    }
 
-
-async isMentorAssignedToIntern(mentorId: string, internId: string): Promise<boolean> {
-  const project = await this.projectRepository
-    .createQueryBuilder('project')
-    .leftJoin('project.intern', 'intern')
-    .leftJoin('project.mentor', 'mentor')
-    .where('intern.id = :internId', { internId })
-    .andWhere('mentor.id = :mentorId', { mentorId })
-    .getOne();
-
-  return !!project;
-}
-
-
-
-
+    // --- Get all Intern IDs mentored by a mentor ---
     async getMentoredInternsIds(mentorId: string): Promise<string[]> {
         const projects = await this.projectRepository.find({
             where: { mentor: { id: mentorId } },
             relations: ['intern'],
-            select: ['id'],
         });
         return projects.map(p => p.intern?.id).filter((id): id is string => !!id);
     }
 
-    async createProject(
-        dto: CreateProjectDto,
-        mentorId: string,
-    ): Promise<Project> {
+    // --- Create a project with milestones and tasks ---
+    async createProject(dto: CreateProjectDto, mentorId: string): Promise<Project> {
         const intern = await this.userRepository.findOneBy({ id: dto.internId, role: UserRole.INTERN });
         const mentor = await this.userRepository.findOneBy({ id: mentorId, role: UserRole.MENTOR });
 
-        if (!intern) {
-            throw new NotFoundException(`Intern with ID "${dto.internId}" not found or is not an INTERN.`);
-        }
-        if (!mentor) {
-            throw new UnauthorizedException(`Mentor with ID "${mentorId}" not found or is not a MENTOR.`);
-        }
+        if (!intern) throw new NotFoundException(`Intern with ID "${dto.internId}" not found.`);
+        if (!mentor) throw new UnauthorizedException(`Mentor with ID "${mentorId}" not found.`);
 
-        const existingProjectForIntern = await this.projectRepository.findOne({
-            where: { intern: { id: intern.id } },
-        });
-        if (existingProjectForIntern) {
-            throw new ConflictException(
-                `Intern "${intern.firstName} ${intern.lastName}" is already assigned to a project.`,
-            );
-        }
+        const existingProject = await this.projectRepository.findOne({ where: { intern: { id: intern.id } } });
+        if (existingProject) throw new ConflictException(`Intern is already assigned to a project.`);
 
-        return this.entityManager.transaction(async transactionalEntityManager => {
-            const newProject = transactionalEntityManager.create(Project, {
+        return this.entityManager.transaction(async tm => {
+            const newProject = tm.create(Project, {
                 title: dto.title,
                 description: dto.description,
-                intern: intern,
+                intern,
                 internId: intern.id,
-                mentor: mentor,
+                mentor,
                 mentorId: mentor.id,
                 status: dto.status || ProjectStatus.PLANNING,
             });
-
-            const savedProject = await transactionalEntityManager.save(newProject);
+            const savedProject = await tm.save(newProject);
 
             const milestones: Milestone[] = [];
             for (const milestoneDto of dto.milestones || []) {
-                const newMilestone = transactionalEntityManager.create(Milestone, {
+                const newMilestone = tm.create(Milestone, {
                     title: milestoneDto.title,
+                    description: milestoneDto.description,
                     dueDate: milestoneDto.dueDate ? new Date(milestoneDto.dueDate) : undefined,
-                    projectId: savedProject.id,
                     project: savedProject,
+                    projectId: savedProject.id,
                 });
-
-                const savedMilestone = await transactionalEntityManager.save(newMilestone);
+                const savedMilestone = await tm.save(newMilestone);
 
                 const tasks: Task[] = [];
                 for (const taskDto of milestoneDto.tasks || []) {
-                    const newTask = transactionalEntityManager.create(Task, {
+                    const newTask = tm.create(Task, {
                         title: taskDto.title,
                         description: taskDto.description,
                         dueDate: taskDto.dueDate ? new Date(taskDto.dueDate) : undefined,
-                        status: TaskStatus.TODO,
+                        status: taskDto.status || TaskStatus.TODO,
                         milestone: savedMilestone,
                         milestoneId: savedMilestone.id,
                         assignee: intern,
                         assigneeId: intern.id,
                     });
-                    tasks.push(newTask);
+                    tasks.push(await tm.save(newTask));
                 }
-                await transactionalEntityManager.save(tasks);
                 savedMilestone.tasks = tasks;
                 milestones.push(savedMilestone);
             }
@@ -146,341 +124,199 @@ async isMentorAssignedToIntern(mentorId: string, internId: string): Promise<bool
         });
     }
 
+    // --- Calculate intern task completion ---
     async calculateInternCompletion(internId: string): Promise<TaskCompletionDto> {
-        const totalTasks = await this.taskRepository.count({
-            where: { assignee: { id: internId } },
-        });
-
+        const totalTasks = await this.taskRepository.count({ where: { assignee: { id: internId } } });
         const completedTasks = await this.taskRepository.count({
-            where: {
-                assignee: { id: internId },
-                status: TaskStatus.DONE,
-            },
+            where: { assignee: { id: internId }, status: TaskStatus.DONE },
         });
-
-        const completionRate = totalTasks > 0 ? (completedTasks / totalTasks) : 0;
-        return {
-            totalTasks,
-            completedTasks,
-            completionRate: parseFloat(completionRate.toFixed(2)),
-        };
+        const completionRate = totalTasks > 0 ? completedTasks / totalTasks : 0;
+        return { totalTasks, completedTasks, completionRate: parseFloat(completionRate.toFixed(2)) };
     }
 
+    // --- Get projects by mentor ---
     async getProjectsByMentor(mentorId: string): Promise<ProjectDetailsDto[]> {
-        const rawProjects = await this.projectRepository.find({
+        const projects = await this.projectRepository.find({
             where: { mentor: { id: mentorId } },
-            relations: [
-                'intern', 'mentor',
-                'milestones',
-                'milestones.tasks',
-                'milestones.tasks.assignee'
-            ],
-            order: { title: 'ASC' },
+            relations: ['mentor', 'intern', 'milestones', 'milestones.tasks', 'milestones.tasks.assignee'],
         });
-
-        return rawProjects.map(project => ({
-            id: project.id,
-            title: project.title,
-            description: project.description || null,
-            status: project.status,
-            mentor: mapUserBasic(project.mentor),
-            intern: mapUserBasic(project.intern),
-            milestones: project.milestones?.map(milestone => ({
-                id: milestone.id,
-                title: milestone.title,
-                description: milestone.description || null,
-                dueDate: milestone.dueDate || null,
-                createdAt: milestone.createdAt,
-                updatedAt: milestone.updatedAt,
-                tasks: milestone.tasks?.map(task => ({
-                    id: task.id,
-                    title: task.title,
-                    description: task.description || null,
-                    status: task.status,
-                    dueDate: task.dueDate || null,
-                    assignee: mapUserBasic(task.assignee),
-                })) || [],
-            })) || [],
-        }));
+        return projects.map(p => this.mapProjectDetails(p));
     }
 
+    // --- Get all projects with details ---
     async findAllWithDetails(): Promise<ProjectDetailsDto[]> {
         const projects = await this.projectRepository.find({
-            relations: [
-                'mentor',
-                'intern',
-                'milestones',
-                'milestones.tasks',
-                'milestones.tasks.assignee',
-            ],
-            order: { title: 'ASC' },
+            relations: ['mentor', 'intern', 'milestones', 'milestones.tasks', 'milestones.tasks.assignee'],
         });
-
-        return projects.map(project => ({
-            id: project.id,
-            title: project.title,
-            description: project.description || null,
-            status: project.status,
-            mentor: mapUserBasic(project.mentor),
-            intern: mapUserBasic(project.intern),
-            milestones: project.milestones?.map(milestone => ({
-                id: milestone.id,
-                title: milestone.title,
-                description: milestone.description || null,
-                dueDate: milestone.dueDate || null,
-                createdAt: milestone.createdAt,
-                updatedAt: milestone.updatedAt,
-                tasks: milestone.tasks?.map(task => ({
-                    id: task.id,
-                    title: task.title,
-                    description: task.description || null,
-                    status: task.status,
-                    dueDate: task.dueDate || null,
-                    assignee: mapUserBasic(task.assignee),
-                })) || [],
-            })) || [],
-        }));
+        return projects.map(p => this.mapProjectDetails(p));
     }
 
-    async findOne(
-        projectId: string,
-        userId: string,
-        userRole: UserRole,
-    ): Promise<ProjectDetailsDto> {
+    // --- Get a single project by ID with role-based access ---
+    async findOne(projectId: string, userId: string, userRole: UserRole): Promise<ProjectDetailsDto> {
         const project = await this.projectRepository.findOne({
             where: { id: projectId },
-            relations: [
-                'mentor',
-                'intern',
-                'milestones',
-                'milestones.tasks',
-                'milestones.tasks.assignee',
-            ],
+            relations: ['mentor', 'intern', 'milestones', 'milestones.tasks', 'milestones.tasks.assignee'],
         });
+        if (!project) throw new NotFoundException(`Project not found.`);
 
-        if (!project) {
-            throw new NotFoundException(`Project with ID ${projectId} not found.`);
-        }
+        const hasAccess = userRole === UserRole.HR || project.mentor?.id === userId || project.intern?.id === userId;
+        if (!hasAccess) throw new ForbiddenException('No permission to view this project.');
 
-        const isMentorOfProject = project.mentor?.id === userId;
-        const isInternOnProject = project.intern?.id === userId;
-
-        if (!(userRole === UserRole.HR || isMentorOfProject || isInternOnProject)) {
-            throw new ForbiddenException('You do not have permission to view this project.');
-        }
-
-        return {
-            id: project.id,
-            title: project.title,
-            description: project.description || null,
-            status: project.status,
-            mentor: mapUserBasic(project.mentor),
-            intern: mapUserBasic(project.intern),
-            milestones: project.milestones?.map(milestone => ({
-                id: milestone.id,
-                title: milestone.title,
-                description: milestone.description || null,
-                dueDate: milestone.dueDate || null,
-                createdAt: milestone.createdAt,
-                updatedAt: milestone.updatedAt,
-                tasks: milestone.tasks?.map(task => ({
-                    id: task.id,
-                    title: task.title,
-                    description: task.description || null,
-                    status: task.status,
-                    dueDate: task.dueDate || null,
-                    assignee: mapUserBasic(task.assignee),
-                })) || [],
-            })) || [],
-        };
+        return this.mapProjectDetails(project);
     }
 
-    async updateProject(
-        projectId: string,
-        dto: UpdateProjectDto,
-        updaterId: string,
-        updaterRole: UserRole,
-    ): Promise<Project> {
+    // --- Update project ---
+    async updateProject(projectId: string, dto: UpdateProjectDto, updaterId: string, updaterRole: UserRole): Promise<Project> {
         const project = await this.projectRepository.findOne({
             where: { id: projectId },
             relations: ['mentor', 'intern', 'milestones', 'milestones.tasks'],
         });
+        if (!project) throw new NotFoundException(`Project not found.`);
 
-        if (!project) {
-            throw new NotFoundException(`Project with ID "${projectId}" not found.`);
-        }
-
-        const isMentorOfProject = project.mentor?.id === updaterId;
         const isHr = updaterRole === UserRole.HR;
-        if (!isHr && !isMentorOfProject) {
-            throw new ForbiddenException('You do not have permission to update this project.');
-        }
+        const isMentor = project.mentor?.id === updaterId;
+        if (!isHr && !isMentor) throw new ForbiddenException('No permission to update this project.');
 
-        let newIntern: User | null = project.intern || null;
+        let newIntern = project.intern || null;
         if (dto.internId && dto.internId !== project.internId) {
             newIntern = await this.userRepository.findOneBy({ id: dto.internId, role: UserRole.INTERN });
-            if (!newIntern) {
-                throw new NotFoundException(`Intern with ID "${dto.internId}" not found.`);
-            }
-            const existingProjectForNewIntern = await this.projectRepository.findOneBy({ intern: { id: dto.internId } });
-            if (existingProjectForNewIntern && existingProjectForNewIntern.id !== projectId) {
-                throw new ConflictException(`The selected intern is already assigned to another project.`);
-            }
+            if (!newIntern) throw new NotFoundException('Intern not found.');
+            const existingProject = await this.projectRepository.findOne({ where: { intern: { id: dto.internId } } });
+            if (existingProject && existingProject.id !== projectId) throw new ConflictException('Intern already assigned to another project.');
         } else if (dto.internId === null) {
-             newIntern = null;
+            newIntern = null;
         }
 
-
-        return this.entityManager.transaction(async transactionalEntityManager => {
+        return this.entityManager.transaction(async tm => {
             project.title = dto.title || project.title;
             project.description = dto.description || project.description;
             project.status = dto.status || project.status;
             project.intern = newIntern;
-            project.internId = newIntern?.id || null;
+            project.internId = newIntern?.id || undefined;
 
-            await transactionalEntityManager.save(Project, project);
+            await tm.save(project);
 
-            if (dto.milestones !== undefined && dto.milestones !== null) {
-const incomingMilestoneIds = (dto.milestones as UpdateMilestoneDto[]).map(m => m.id).filter((id): id is string => !!id);
-                if (incomingMilestoneIds.length > 0) {
-                    await transactionalEntityManager.delete(Milestone, {
-                        project: { id: project.id },
-                        id: Not(In(incomingMilestoneIds)),
-                    });
-                } else if (dto.milestones.length === 0) {
-                    await transactionalEntityManager.delete(Milestone, { project: { id: project.id } });
-                }
-
-                const updatedMilestones: Milestone[] = [];
-                for (const milestoneDto of dto.milestones as UpdateMilestoneDto[]) {
-                    let currentMilestone = await transactionalEntityManager.findOne(Milestone, { where: { id: milestoneDto.id || '' }, relations: ['tasks'] });
-
-                    if (!currentMilestone) {
-                        currentMilestone = transactionalEntityManager.create(Milestone, {
-                            title: milestoneDto.title,
-                           // description: milestoneDto.description,
-                            dueDate: milestoneDto.dueDate ? new Date(milestoneDto.dueDate) : undefined,
-                            projectId: project.id,
-                            project: project,
-                        });
-                    } else {
-                        currentMilestone.title = milestoneDto.title || currentMilestone.title;
-                        currentMilestone.description = milestoneDto.description || currentMilestone.description;
-                        currentMilestone.dueDate = milestoneDto.dueDate ? new Date(milestoneDto.dueDate) : currentMilestone.dueDate;
-                    }
-                    const savedMilestone = await transactionalEntityManager.save(currentMilestone);
-
-                    if (milestoneDto.tasks !== undefined && milestoneDto.tasks !== null) {
-                        const incomingTaskIds = milestoneDto.tasks.map(t => t.id).filter((id): id is string => !!id);
-
-                        if (incomingTaskIds.length > 0) {
-                            await transactionalEntityManager.delete(Task, {
-                                milestone: { id: savedMilestone.id },
-                                id: Not(In(incomingTaskIds)),
-                            });
-                        } else if (milestoneDto.tasks.length === 0) {
-                            await transactionalEntityManager.delete(Task, { milestone: { id: savedMilestone.id } });
-                        }
-
-                        const updatedTasks: Task[] = [];
-                        for (const taskDto of milestoneDto.tasks as UpdateTaskDto[]) {
-                            let currentTask = await transactionalEntityManager.findOne(Task, { where: { id: taskDto.id || '' } });
-                            let taskAssignee: User | null;
-
-                            if (taskDto.assignedToInternId === null) {
-                                taskAssignee = null;
-                            } else if (taskDto.assignedToInternId) {
-                                taskAssignee = await this.userRepository.findOneBy({ id: taskDto.assignedToInternId });
-                                if (!taskAssignee) throw new NotFoundException(`Assignee with ID "${taskDto.assignedToInternId}" for task "${taskDto.title || currentTask?.title || savedMilestone.title}" not found.`);
-                            } else {
-                                taskAssignee = currentTask?.assignee || null;
-                            }
-
-                            if (!currentTask) {
-                                currentTask = transactionalEntityManager.create(Task, {
-                                    title: taskDto.title || '',
-                                    description: taskDto.description,
-                                    dueDate: taskDto.dueDate ? new Date(taskDto.dueDate) : undefined,
-                                    status: taskDto.status || TaskStatus.TODO,
-                                    milestone: savedMilestone,
-                                    milestoneId: savedMilestone.id,
-                                    assignee: taskAssignee,
-                                    assigneeId: taskAssignee?.id || null,
-                                });
-                            } else {
-                                currentTask.title = taskDto.title || currentTask.title || '';
-                                currentTask.description = taskDto.description || currentTask.description;
-                                currentTask.dueDate = taskDto.dueDate ? new Date(taskDto.dueDate) : currentTask.dueDate;
-                                currentTask.status = taskDto.status || currentTask.status;
-                                currentTask.assignee = taskAssignee;
-                                currentTask.assigneeId = taskAssignee?.id || null;
-                            }
-                            updatedTasks.push(await transactionalEntityManager.save(currentTask));
-                        }
-                        savedMilestone.tasks = updatedTasks;
-                    } else if (milestoneDto.tasks === null) {
-                        await transactionalEntityManager.delete(Task, { milestone: { id: savedMilestone.id } });
-                        savedMilestone.tasks = [];
-                    }
-                    updatedMilestones.push(savedMilestone);
-                }
-                project.milestones = updatedMilestones;
-            } else if (dto.milestones === null) {
-                await transactionalEntityManager.delete(Milestone, { project: { id: project.id } });
-                project.milestones = [];
+            // Handle milestones/tasks
+            if (dto.milestones) {
+                await this.syncMilestonesAndTasks(project, dto.milestones, tm);
             }
-
 
             return project;
         });
     }
 
-    async getTasksForIntern(internId: string): Promise<Task[]> {
-        return this.taskRepository.find({
-            where: { assignee: { id: internId } },
-            relations: ['milestone', 'milestone.project'],
-            order: { dueDate: 'ASC' },
-        });
-    }
-
-    
-
-    async updateTaskStatus(
-        taskId: string,
-        newStatus: TaskStatus,
-        updaterId: string,
-        updaterRole: UserRole,
-    ): Promise<Task> {
+    // --- Update a task's status ---
+    async updateTaskStatus(taskId: string, newStatus: TaskStatus, updaterId: string, updaterRole: UserRole): Promise<Task> {
         const task = await this.taskRepository.findOne({
             where: { id: taskId },
             relations: ['assignee', 'milestone', 'milestone.project', 'milestone.project.mentor'],
         });
+        if (!task) throw new NotFoundException('Task not found.');
 
-        if (!task) {
-            throw new NotFoundException(`Task with ID ${taskId} not found.`);
-        }
-
-        const isAssignee = task.assignee?.id === updaterId;
-        const isProjectMentor = task.milestone?.project?.mentor?.id === updaterId;
-        const isHr = updaterRole === UserRole.HR;
-
-        if (!isAssignee && !isProjectMentor && !isHr) {
-            throw new ForbiddenException(
-                'You do not have permission to update the status of this task.',
-            );
-        }
+        const hasAccess = task.assignee?.id === updaterId || task.milestone?.project?.mentor?.id === updaterId || updaterRole === UserRole.HR;
+        if (!hasAccess) throw new ForbiddenException('No permission to update task.');
 
         task.status = newStatus;
         return this.taskRepository.save(task);
     }
+
+    // --- Helper: map project entity to ProjectDetailsDto ---
+    private mapProjectDetails(project: Project): ProjectDetailsDto {
+        return {
+            id: project.id,
+            title: project.title,
+            description: project.description || null,
+            status: project.status,
+            mentor: project.mentor ? mapUserBasic(project.mentor) : null,
+            intern: project.intern ? mapUserBasic(project.intern) : null,
+            milestones: project.milestones?.map(m => ({
+                id: m.id,
+                title: m.title,
+                description: m.description || null,
+                dueDate: m.dueDate || null,
+                createdAt: m.createdAt,
+                updatedAt: m.updatedAt,
+                tasks: m.tasks?.map(t => ({
+                    id: t.id,
+                    title: t.title,
+                    description: t.description || null,
+                    status: t.status,
+                    dueDate: t.dueDate || null,
+                    assignee: t.assignee ? mapUserBasic(t.assignee) : null,
+                })) || [],
+            })) || [],
+        };
+    }
+
+    // --- Helper: sync milestones & tasks during update ---
+    private async syncMilestonesAndTasks(project: Project, milestonesDto: UpdateMilestoneDto[], tm: EntityManager) {
+        const incomingIds = milestonesDto.map(m => m.id).filter((id): id is string => !!id);
+        if (incomingIds.length > 0) {
+            await tm.delete(Milestone, { project: { id: project.id }, id: Not(In(incomingIds)) });
+        }
+
+        for (const milestoneDto of milestonesDto) {
+            let milestone = milestoneDto.id ? await tm.findOne(Milestone, { where: { id: milestoneDto.id }, relations: ['tasks'] }) : null;
+            if (!milestone) {
+                milestone = tm.create(Milestone, {
+                    title: milestoneDto.title,
+                    description: milestoneDto.description,
+                    dueDate: milestoneDto.dueDate ? new Date(milestoneDto.dueDate) : undefined,
+                    project,
+                    projectId: project.id,
+                });
+            } else {
+                milestone.title = milestoneDto.title || milestone.title;
+                milestone.description = milestoneDto.description || milestone.description;
+                milestone.dueDate = milestoneDto.dueDate ? new Date(milestoneDto.dueDate) : milestone.dueDate;
+            }
+
+            const savedMilestone = await tm.save(milestone);
+
+            // Handle tasks
+            if (milestoneDto.tasks) {
+                const taskIds = milestoneDto.tasks.map(t => t.id).filter((id): id is string => !!id);
+                if (taskIds.length > 0) await tm.delete(Task, { milestone: { id: savedMilestone.id }, id: Not(In(taskIds)) });
+
+                for (const taskDto of milestoneDto.tasks) {
+                    let task = taskDto.id ? await tm.findOne(Task, { where: { id: taskDto.id } }) : null;
+                    const assignee = taskDto.assignedToInternId
+                        ? await this.userRepository.findOneBy({ id: taskDto.assignedToInternId })
+                        : task?.assignee || null;
+
+                    if (!task) {
+                        task = tm.create(Task, {
+                            title: taskDto.title || '',
+                            description: taskDto.description,
+                            dueDate: taskDto.dueDate ? new Date(taskDto.dueDate) : undefined,
+                            status: taskDto.status || TaskStatus.TODO,
+                            milestone: savedMilestone,
+                            milestoneId: savedMilestone.id,
+                            assignee,
+                            assigneeId: assignee?.id || null,
+                        });
+                    } else {
+                        task.title = taskDto.title || task.title;
+                        task.description = taskDto.description || task.description;
+                        task.dueDate = taskDto.dueDate ? new Date(taskDto.dueDate) : task.dueDate;
+                        task.status = taskDto.status || task.status;
+                        task.assignee = assignee;
+                        task.assigneeId = assignee?.id || null;
+                    }
+                    await tm.save(task);
+                }
+            }
+        }
+    }
 }
 
+// --- Helper: Map User entity to UserBasicDto ---
 function mapUserBasic(user: User | null | undefined): UserBasicDto | null {
     if (!user) return null;
     return {
         id: user.id,
-        firstName: user.firstName || 'N/A', 
+        firstName: user.firstName || 'N/A',
         lastName: user.lastName || 'N/A',
-        email: user.email, 
+        email: user.email,
     } as UserBasicDto;
 }

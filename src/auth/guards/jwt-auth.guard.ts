@@ -1,7 +1,7 @@
-import { Injectable, ExecutionContext, UnauthorizedException } from '@nestjs/common'; // CRITICAL FIX: Import UnauthorizedException
+import { ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Reflector } from '@nestjs/core';
-import { IS_PUBLIC_KEY } from '../decorators/public.decorator'; // Import public decorator key
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
@@ -9,30 +9,22 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     super();
   }
 
-  // CRITICAL FIX: Override canActivate to check for public routes
   canActivate(context: ExecutionContext) {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
-    if (isPublic) {
-      return true; // Allow access to public routes without JWT validation
-    }
-    // For protected routes, trigger the JWT authentication flow
+    if (isPublic) return true;
+
     return super.canActivate(context);
   }
 
-  // CRITICAL FIX: Override handleRequest to throw UnauthorizedException explicitly
-  // This ensures a 401 is always returned if authentication fails for a protected route.
   handleRequest(err: any, user: any, info: any) {
-    // You can throw an exception based on error or user
     if (err || !user) {
-      console.error('[JwtAuthGuard] Authentication failed:', err || info);
-      console.error('[JwtAuthGuard] Error details:', err);
-      console.error('[JwtAuthGuard] Info details:', info);
       throw err || new UnauthorizedException('Authentication failed. Invalid or missing token.');
     }
-    console.log('[JwtAuthGuard] Authentication successful. User attached:', { id: user?.id, email: user?.email, role: user?.role });
+
+    // req.user now contains provider info
     return user;
   }
 }

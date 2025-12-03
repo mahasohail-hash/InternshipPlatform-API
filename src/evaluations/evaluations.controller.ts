@@ -28,9 +28,9 @@ import { Public } from '../auth/decorators/public.decorator';
 export class EvaluationsController {
   constructor(private readonly evaluationsService: EvaluationsService) {}
 
-  /**
-   * 1️⃣ Create Evaluation (Mentor or Self Review)
-   */
+  // ==============================
+  // 1️⃣ Create Evaluation
+  // ==============================
   @Post()
   @Roles(UserRole.MENTOR, UserRole.INTERN)
   @HttpCode(HttpStatus.CREATED)
@@ -40,12 +40,14 @@ export class EvaluationsController {
   ) {
     const submitterId = req.user.id;
 
+    // Self-review validation
     if (dto.type === EvaluationType.SELF && submitterId !== dto.internId) {
       throw new UnauthorizedException(
         'You can only submit a self-review for yourself.',
       );
     }
 
+    // Mentor-only validation
     if (dto.type !== EvaluationType.SELF && req.user.role !== UserRole.MENTOR) {
       throw new UnauthorizedException(
         'Only mentors can submit this type of evaluation.',
@@ -55,9 +57,9 @@ export class EvaluationsController {
     return this.evaluationsService.createEvaluation(dto, submitterId);
   }
 
-  /**
-   * 2️⃣ Get All Evaluations (HR or Mentor View)
-   */
+  // ==============================
+  // 2️⃣ Get All Evaluations (HR or Mentor View)
+  // ==============================
   @Get()
   @Roles(UserRole.HR, UserRole.MENTOR)
   async findAll(
@@ -69,10 +71,10 @@ export class EvaluationsController {
     return this.evaluationsService.findAll(userId, userRole, queryInternId);
   }
 
-  /**
-   * 3️⃣ Get All Evaluations for a Specific Intern
-   *    (Public safe – used in analytics)
-   */
+  // ==============================
+  // 3️⃣ Get Evaluations for Specific Intern
+  //    (Public safe endpoint)
+  // ==============================
   @Get('intern/:internId')
   @Public()
   async getInternEvaluations(
@@ -86,9 +88,9 @@ export class EvaluationsController {
     );
   }
 
-  /**
-   * 4️⃣ Generate AI Draft Review for an Intern (Mentor/HR)
-   */
+  // ==============================
+  // 4️⃣ Generate AI Draft Review for an Intern
+  // ==============================
   @Post('draft-review/:internId')
   @Roles(UserRole.MENTOR, UserRole.HR)
   @HttpCode(HttpStatus.OK)
@@ -99,14 +101,7 @@ export class EvaluationsController {
     const requesterRole = req.user.role;
     const mentorId = req.user.id;
 
-    // Optional: HR can also request AI drafts for any intern
-    if (requesterRole === UserRole.MENTOR) {
-      // Mentor validation handled in service (project assignment check)
-      return this.evaluationsService.generateAiDraft(internId, mentorId);
-    }
-
-    if (requesterRole === UserRole.HR) {
-      // HR bypasses project validation
+    if ([UserRole.MENTOR, UserRole.HR].includes(requesterRole)) {
       return this.evaluationsService.generateAiDraft(internId, mentorId);
     }
 

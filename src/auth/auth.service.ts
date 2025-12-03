@@ -1,74 +1,159 @@
-import { Injectable, UnauthorizedException, NotFoundException, ConflictException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { UsersService } from '../users/users.service';
-import { User } from '../users/entities/users.entity';
+import { User, UserRole } from '../users/entities/users.entity';
 import * as bcrypt from 'bcrypt';
-import { UserRole } from '../common/enums/user-role.enum';
-import { CreateUserDto } from '../users/dto/create-user.dto';
-import { ConfigService } from '@nestjs/config';
-import { JwtSignOptions } from '@nestjs/jwt';
+import { SignUpDto } from './dto/signup.dto';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private usersService: UsersService,
-    private jwtService: JwtService,
-    @InjectRepository(User) private userRepository: Repository<User>,
-    private configService: ConfigService,
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
   ) {}
 
-  async validateUser(email: string, pass: string): Promise<User | null> {
+  // Validate user credentials
+  async validateUser(email: string, password: string): Promise<User | null> {
     const user = await this.usersService.findOneByEmail(email);
+    if (!user) return null;
 
-    if (!user) {
-        return null;
-    }
+    const isMatch = await bcrypt.compare(password, user.passwordHash);
+    if (!isMatch) return null;
 
-    const isMatch = await bcrypt.compare(pass, user.passwordHash);
-
-    if (isMatch) {
-        const { passwordHash, ...result } = user;
-        return result as User;
-    }
-
-    return null;
+    return user;
   }
 
-  async login(user: User) {
-    const payload = {
+  // Generate JWT token
+  generateToken(user: User) {
+    return this.jwtService.sign({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
+    });
+  }
+
+  // Credentials login
+  async login(email: string, password: string) {
+    const user = await this.validateUser(email, password);
+    if (!user) throw new UnauthorizedException('Invalid credentials');
+
+    const access_token = this.generateToken(user);
+    return {
+      status: 200,
+      access_token,
+      user: {
         id: user.id,
         email: user.email,
-        role: user.role
+        role: user.role,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
+        provider: user.provider || 'credentials',
+      },
     };
+  }
 
-    const jwtSecret = this.configService.get<string>('JWT_SECRET');
-    if (!jwtSecret) {
-        console.error("JWT_SECRET is not configured for AuthService.login. Falling back to default.");
-        throw new InternalServerErrorException('JWT secret not configured.');
-    }
+  // Sign-up
+ async signUp(dto: SignUpDto) {
+  const exists = await this.usersService.findOneByEmail(dto.email).catch(() => null);
+  if (exists) throw new BadRequestException('Email already in use');
 
-    const expiresInValue = this.configService.get<string>('JWT_EXPIRES_IN', '7d');
+  // Hash password
+  const passwordHash = await bcrypt.hash(dto.password, 10);
 
-    // CRITICAL FIX: Cast expiresIn to `any` as a last resort to bypass persistent `jsonwebtoken` type issues.
-    // This is often needed with certain library versions where types are overly strict.
-    const signOptions: JwtSignOptions = {
-      secret: jwtSecret,
-      expiresIn: expiresInValue as any, // Use `any` here
-    };
+  // Map to CreateUserDto
+  const user = await this.usersService.createUser({
+    email: dto.email,
+    firstName: dto.firstName,
+    lastName: dto.lastName,
+    password: passwordHash,  
+    role: UserRole.INTERN,
+    provider: 'credentials',
+  });
 
-    return {
+  const access_token = this.generateToken(user);
+
+  return {
+    status: 201,
+    access_token,
+    user: {
       id: user.id,
       email: user.email,
       role: user.role,
       firstName: user.firstName,
       lastName: user.lastName,
-      accessToken: this.jwtService.sign(payload, signOptions),
+      name: user.name || `${user.firstName} ${user.lastName}`.trim(),
+      provider: user.provider || 'credentials',
+    },
+  };
+}
+
+
+  // OAuth upsert
+  async oauthUpsert(provider: string, profile: any) {
+    const providerId = profile.id?.toString();
+    let user: User | null = null;
+
+    if (providerId) {
+      user = await this.usersService.findByProviderId(provider, providerId);
+    }
+
+    if (!user && profile.email) {
+      user = await this.usersService.findOneByEmail(profile.email).catch(() => null);
+    }
+
+    if (!user) {
+    user = await this.usersService.createUser({
+  email: profile.email ?? '',
+  firstName: profile.firstName ?? profile.name ?? '', 
+  lastName: profile.lastName ?? '',                
+  password: '', 
+  provider,
+  providerId,
+  role: UserRole.INTERN,
+});
+
+
+    } else if (!user.provider) {
+      user.provider = provider;
+      user.providerId = providerId;
+      await this.usersService.update(user.id, user);
+    }
+
+    if (provider === 'github' && ![UserRole.MENTOR, UserRole.INTERN].includes(user.role)) {
+      throw new UnauthorizedException('GitHub sign-in not allowed for this role');
+    }
+
+    return this.socialLogin(user);
+  }
+
+  // Social login helper
+  async socialLogin(user: User) {
+    const access_token = this.generateToken(user);
+    return {
+      access_token,
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        name: `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim(),
+        provider: user.provider || 'credentials',
+      },
     };
   }
 
-  async register(registerDto: CreateUserDto): Promise<User> {
-    return this.usersService.create(registerDto);
+  // Reset password
+  async resetPassword(token: string, newPassword: string) {
+    const user = await this.usersService.findByResetToken(token);
+    if (!user) throw new BadRequestException('Invalid reset token');
+
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    user.resetPasswordToken = null;
+    user.resetPasswordExpires = null;
+
+    await this.usersService.update(user.id, user);
   }
 }

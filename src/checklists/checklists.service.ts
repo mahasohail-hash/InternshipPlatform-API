@@ -1,236 +1,304 @@
-import { Injectable, NotFoundException, ForbiddenException, ConflictException, InternalServerErrorException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, Not, EntityManager, DataSource, FindManyOptions } from 'typeorm'; // CRITICAL FIX: Import FindManyOptions
+import { Repository, In, DataSource } from 'typeorm';
 import { ChecklistTemplate } from './entities/checklist-template.entity';
 import { ChecklistTemplateItem } from './entities/checklist-template-item.entity';
-import { Checklist } from './entities/checklist.entity'; // Keep Checklist for other contexts if needed
-import { ChecklistItem } from './entities/checklist-item.entity'; // Keep ChecklistItem for other contexts if needed
+import { Checklist } from './entities/checklist.entity';
+import { ChecklistItem } from './entities/checklist-item.entity';
 import { InternChecklist } from './entities/intern-checklist.entity';
 import { InternChecklistItem } from './entities/intern-checklist-item.entity';
+import { User } from '@/users/entities/users.entity';
+import { Intern } from '@/interns/entities/intern.entity';
 import { CreateChecklistTemplateDto } from './dto/create-checklist-template.dto';
 import { UpdateChecklistTemplateDto } from './dto/update-checklist-template.dto';
-import { User } from '../users/entities/users.entity';
+import { AssignChecklistsDto } from './dto/assign-checklist.dto';
+
 
 @Injectable()
 export class ChecklistsService {
-  updateChecklistItemStatus(itemId: string, isCompleted: boolean) {
-    throw new Error('Method not implemented.');
-  }
+  private readonly logger = new Logger(ChecklistsService.name);
+
   constructor(
-    @InjectRepository(ChecklistTemplate)
-    private templateRepository: Repository<ChecklistTemplate>,
-    @InjectRepository(ChecklistTemplateItem)
-    private itemRepository: Repository<ChecklistTemplateItem>,
-    @InjectRepository(Checklist) // Keep if Checklist is intended for something else
-    private checklistRepository: Repository<Checklist>,
-    @InjectRepository(ChecklistItem) // Keep if ChecklistItem is intended for something else
-    private checklistItemRepository: Repository<ChecklistItem>,
-    @InjectRepository(InternChecklist)
-    private internChecklistRepository: Repository<InternChecklist>,
-    @InjectRepository(InternChecklistItem)
-    private internChecklistItemRepository: Repository<InternChecklistItem>,
-    private readonly entityManager: EntityManager,
+    @InjectRepository(ChecklistTemplate) private readonly templateRepo: Repository<ChecklistTemplate>,
+    @InjectRepository(ChecklistTemplateItem) private readonly templateItemRepo: Repository<ChecklistTemplateItem>,
+    @InjectRepository(Checklist) private readonly checklistRepo: Repository<Checklist>,
+    @InjectRepository(ChecklistItem) private readonly checklistItemRepo: Repository<ChecklistItem>,
+    @InjectRepository(InternChecklist) private readonly internChecklistRepo: Repository<InternChecklist>,
+    @InjectRepository(InternChecklistItem) private readonly internChecklistItemRepo: Repository<InternChecklistItem>,
+    @InjectRepository(User) private readonly userRepo: Repository<User>,
+    @InjectRepository(Intern) private readonly internRepo: Repository<Intern>,
     private readonly dataSource: DataSource,
   ) {}
 
-  async createTemplate(dto: CreateChecklistTemplateDto): Promise<ChecklistTemplate> {
-    const { items, ...templateData } = dto;
-    try {
-      const template = this.templateRepository.create(templateData);
-      const newTemplate = await this.templateRepository.save(template);
+  /** ---------------- Templates ---------------- */
+  async findAllTemplates() {
+    return this.templateRepo.find({ relations: ['items'], order: { name: 'ASC' } });
+  }
 
-      if (items && items.length > 0) {
-        const templateItems = items.map((itemDto) =>
-          this.itemRepository.create({
-            title: itemDto.title,
-            description: itemDto.text,
-            template: newTemplate
+  async findTemplateById(id: string) {
+    const template = await this.templateRepo.findOne({ where: { id }, relations: ['items'] });
+    if (!template) throw new NotFoundException('Template not found');
+    return template;
+  }
+
+  async createTemplate(dto: CreateChecklistTemplateDto) {
+    const name = dto.name.trim();
+    if (!name) throw new BadRequestException('Template name required');
+    const existing = await this.templateRepo.findOne({ where: { name } });
+    if (existing) throw new BadRequestException('Template name already exists');
+
+    return this.dataSource.transaction(async manager => {
+      const tpl = manager.create(ChecklistTemplate, {
+        name,
+        description: dto.description?.trim() ?? null,
+      });
+      const savedTpl = await manager.save(tpl);
+
+      const items = dto.items.map(i =>
+        manager.create(ChecklistTemplateItem, {
+          title: i.title.trim(),
+          description: i.description?.trim() ?? null,
+          text: (i as any).text ?? null,
+          template: savedTpl,
+          templateId: savedTpl.id,
+        }),
+      );
+      if (items.length) await manager.save(items);
+
+      return manager.findOne(ChecklistTemplate, { where: { id: savedTpl.id }, relations: ['items'] });
+    });
+  }
+
+  async updateTemplate(id: string, dto: UpdateChecklistTemplateDto) {
+    const template = await this.templateRepo.findOne({ where: { id }, relations: ['items'] });
+    if (!template) throw new NotFoundException('Template not found');
+
+    return this.dataSource.transaction(async manager => {
+      template.name = dto.name?.trim() ?? template.name;
+      template.description = dto.description?.trim() ?? template.description;
+      await manager.save(template);
+
+      if (dto.items) {
+        const incomingIds = dto.items.map(i => i.id).filter(Boolean) as string[];
+
+        // Delete items not in incoming list
+        await manager
+          .createQueryBuilder()
+          .delete()
+          .from(ChecklistTemplateItem)
+          .where('templateId = :id', { id })
+          .andWhere(incomingIds.length ? 'id NOT IN (:...incomingIds)' : '1=0', { incomingIds })
+          .execute()
+          .catch(() => {});
+
+        // Upsert items
+        const itemsToUpsert = dto.items.map(i =>
+          manager.create(ChecklistTemplateItem, {
+            id: i.id,
+            title: i.title?.trim() ?? 'Untitled',
+            description: i.description?.trim() ?? null,
+            template,
+            templateId: id,
           }),
         );
-        await this.itemRepository.save(templateItems);
-        newTemplate.items = templateItems;
+        await manager.save(itemsToUpsert);
       }
-      return newTemplate;
-    } catch (error) {
-      if ((error as any).code === '23505') {
-        throw new ConflictException(`A template with the name '${templateData.name}' already exists.`);
-      }
-      throw error;
-    }
-  }
 
-  async findDefaultTemplate(): Promise<ChecklistTemplate | null> {
-    return this.templateRepository.findOne({
-      where: { name: 'Default Intern Onboarding Checklist' },
-      relations: ['items'],
+      return manager.findOne(ChecklistTemplate, { where: { id }, relations: ['items'] });
     });
   }
 
-  async findAllTemplates(): Promise<ChecklistTemplate[]> {
-    return this.templateRepository.find({
-      relations: ['items'],
-      order: { name: 'ASC' },
+  async deleteTemplate(id: string, options?: { force?: boolean }) {
+    const template = await this.templateRepo.findOne({ where: { id } });
+    if (!template) throw new NotFoundException('Template not found');
+
+    const assignedCount = await this.internChecklistRepo.count({ where: { template: { id } } as any });
+    if (assignedCount > 0 && !options?.force) {
+      throw new BadRequestException('Template assigned to interns. Use force=true to delete.');
+    }
+
+    return this.dataSource.transaction(async manager => {
+      if (assignedCount > 0) {
+        const internChecklists = await manager.find(InternChecklist, { where: { template: { id } } as any });
+        const icIds = internChecklists.map(ic => ic.id);
+        if (icIds.length) {
+          await manager.delete(InternChecklistItem, { internChecklist: In(icIds) } as any);
+          await manager.delete(InternChecklist, { id: In(icIds) } as any);
+        }
+      }
+
+      const checklists = await manager.find(Checklist, { where: { template: { id } } as any });
+      const checklistIds = checklists.map(c => c.id);
+      if (checklistIds.length) {
+        await manager.delete(ChecklistItem, { checklistId: In(checklistIds) } as any);
+        await manager.delete(Checklist, { id: In(checklistIds) } as any);
+      }
+
+      await manager.delete(ChecklistTemplateItem, { template: { id } } as any);
+      await manager.delete(ChecklistTemplate, { id } as any);
     });
   }
 
-  async updateTemplate(id: string, dto: UpdateChecklistTemplateDto): Promise<ChecklistTemplate> {
-    const { items, ...templateData } = dto;
+  /** ---------------- Assignments ---------------- */
+  async assignTemplatesToInterns(templateIds: string[], internIds: string[], hrUserId?: string) {
+    if (!templateIds.length || !internIds.length) throw new BadRequestException('templateIds & internIds required');
 
-    let template = await this.templateRepository.findOne({ where: { id }, relations: ['items'] });
-    if (!template) {
-      throw new NotFoundException(`Template ${id} not found`);
-    }
+    const templates = await this.templateRepo.find({ where: { id: In(templateIds) }, relations: ['items'] });
+    if (!templates.length) throw new NotFoundException('Templates not found');
 
-    try {
-      await this.templateRepository.save({ ...template, ...templateData });
-    } catch (error) {
-      if ((error as any).code === '23505') {
-        throw new ConflictException(`A template with the name '${templateData.name}' already exists.`);
+    const interns = await this.internRepo.find({ where: { id: In(internIds) }, relations: ['user'] });
+    if (interns.length !== internIds.length) throw new NotFoundException('Some interns not found');
+
+    return this.dataSource.transaction(async manager => {
+      for (const intern of interns) {
+        for (const template of templates) {
+          const existingChecklist = await manager.findOne(Checklist, {
+            where: { template: { id: template.id }, interns: { id: intern.id } } as any,
+          });
+          if (existingChecklist) continue;
+
+          const checklist = manager.create(Checklist, {
+            name: template.name,
+            title: template.name,
+            template,
+            templateId: template.id,
+            userId: hrUserId ?? null,
+          });
+          const savedChecklist = await manager.save(checklist);
+
+          const checklistItems = (template.items || []).map(ti =>
+            manager.create(ChecklistItem, {
+              title: ti.title,
+              description: ti.description,
+              checklist: savedChecklist,
+              checklistId: savedChecklist.id,
+              templateId: ti.id,
+              isCompleted: false,
+            }),
+          );
+          if (checklistItems.length) await manager.save(checklistItems);
+
+          const internChecklist = manager.create(InternChecklist, {
+            checklist: savedChecklist,
+            checklistId: savedChecklist.id,
+            intern,
+            internId: intern.id,
+            template,
+            templateId: template.id,
+            isComplete: false,
+          });
+          const savedIC = await manager.save(internChecklist);
+
+          const internItems = (checklistItems || []).map(ci =>
+            manager.create(InternChecklistItem, {
+              title: ci.title,
+              description: ci.description,
+              isCompleted: false,
+              internChecklist: savedIC,
+              internChecklistId: savedIC.id,
+            }),
+          );
+          if (internItems.length) await manager.save(internItems);
+        }
       }
-      throw error;
-    }
+    });
+  }
 
-    if (items !== undefined) { // Check if items array is explicitly provided or undefined
-      const incomingItemIds = items.map((item) => item.id).filter((itemId): itemId is string => !!itemId); // Filter and type-guard
+  /** ---------------- Fetching ---------------- */
+  async getChecklistsForIntern(internId: string) {
+    return this.internChecklistRepo.find({
+      where: { intern: { id: internId } } as any,
+      relations: ['template', 'checklist', 'items', 'checklist.items'],
+      order: { assignedAt: 'ASC' },
+    });
+  }
 
-      if (incomingItemIds.length > 0) {
-        await this.itemRepository.delete({
-          template: { id: template.id },
-          id: Not(In(incomingItemIds)),
-        });
-      } else if (items.length === 0) { // If an empty array is sent, delete all
-        await this.itemRepository.delete({ template: { id: template.id } });
-      }
+  async getAssignedChecklists(internId: string) {
+    return this.internChecklistRepo.find({
+      where: { intern: { id: internId } } as any,
+      relations: ['template', 'items', 'checklist'],
+    });
+  }
 
-      const itemsToSave = items.map((itemDto) => {
-        return this.itemRepository.create({
-          id: itemDto.id,
-          title: itemDto.title,
-          description: itemDto.text,
-          template: template,
-        });
+  /** ---------------- Item operations ---------------- */
+  async updateItemStatus(itemId: string, isCompleted: boolean, actorInternId?: string) {
+    const item = await this.checklistItemRepo.findOne({ where: { id: itemId }, relations: ['checklist'] });
+    if (!item) throw new NotFoundException('Checklist item not found');
+
+    if (actorInternId) {
+      const ic = await this.internChecklistRepo.findOne({
+        where: { checklist: { id: item.checklist.id }, intern: { id: actorInternId } } as any,
       });
-      await this.itemRepository.save(itemsToSave);
-      template.items = itemsToSave; // Update the relation for the returned object
+      if (!ic) throw new ForbiddenException('You are not allowed to update this item');
     }
-    // If items is undefined, no changes to nested items are made.
 
-    const finalTemplate = await this.templateRepository.findOne({
-      where: { id },
-      relations: ['items'],
+    return this.dataSource.transaction(async manager => {
+      item.isCompleted = isCompleted;
+      await manager.save(item);
+
+      const internChecklists = await manager.find(InternChecklist, { where: { checklist: { id: item.checklist.id } } as any });
+      const icIds = internChecklists.map(ic => ic.id);
+      if (icIds.length) {
+        await manager
+          .createQueryBuilder()
+          .update(InternChecklistItem)
+          .set({ isCompleted, completedAt: isCompleted ? new Date() : null })
+          .where('intern_checklist_id IN (:...icIds)', { icIds })
+          .andWhere('title = :title', { title: item.title })
+          .execute();
+      }
+
+      const remaining = await manager.count(ChecklistItem, { where: { checklistId: item.checklist.id, isCompleted: false } } as any);
+      const checklist = await manager.findOne(Checklist, { where: { id: item.checklist.id } as any });
+      if (checklist) {
+        checklist.isCompleted = remaining === 0;
+        await manager.save(checklist);
+      }
+
+      for (const ic of internChecklists) {
+        const rem = await manager.count(InternChecklistItem, { where: { internChecklistId: ic.id, isCompleted: false } as any });
+        ic.isComplete = rem === 0;
+        await manager.save(ic);
+      }
     });
-
-    if (!finalTemplate) {
-      throw new InternalServerErrorException(`Template ${id} not found after update, potential data inconsistency.`);
-    }
-    return finalTemplate;
   }
 
-  async deleteTemplate(id: string): Promise<void> {
-    const result = await this.templateRepository.delete(id);
-    if (result.affected === 0) throw new NotFoundException(`Template ${id} not found`);
+  /** ---------------- Misc ---------------- */
+  async findAllChecklists() {
+    return this.checklistRepo.find({ relations: ['template', 'items', 'internChecklists'] });
   }
 
-  // CRITICAL FIX: Get an Intern's specific checklist using InternChecklistRepository
-  async findChecklistByInternId(internId: string): Promise<InternChecklist> {
-    const checklist = await this.internChecklistRepository.findOne({
-      // CRITICAL FIX: Correct `where` clause for relation
-      where: { intern: { id: internId } },
-      relations: {
-        template: true,
-        items: true,
-      },
-      order: { createdAt: 'ASC' },
-    });
-
-    if (!checklist) {
-      throw new NotFoundException(`No checklist found for intern ${internId}`);
-    }
-
-    if (checklist.items) {
-        checklist.items.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-    }
+  async findChecklistById(id: string) {
+    const checklist = await this.checklistRepo.findOne({ where: { id }, relations: ['template', 'items', 'internChecklists'] });
+    if (!checklist) throw new NotFoundException('Checklist not found');
     return checklist;
   }
 
-  async updateItemStatus(itemId: string, isCompleted: boolean, internId: string): Promise<InternChecklistItem> {
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+  async removeChecklistFromIntern(internId: string, checklistId: string) {
+    return this.dataSource.transaction(async manager => {
+      const internChecklist = await manager.findOne(InternChecklist, {
+        where: { intern: { id: internId }, checklist: { id: checklistId } } as any,
+        relations: ['items'],
+      });
+      if (!internChecklist) throw new NotFoundException('Intern checklist not found');
 
-    try {
-        const item = await queryRunner.manager.findOne(InternChecklistItem, {
-            where: { id: itemId },
-            relations: ['internChecklist', 'internChecklist.intern'],
-        });
+      await manager.delete(InternChecklistItem, { internChecklist: { id: internChecklist.id } } as any);
+      await manager.delete(InternChecklist, { id: internChecklist.id } as any);
 
-        if (!item) {
-            throw new NotFoundException('Checklist item not found.');
+      const checklist = await manager.findOne(Checklist, { where: { id: checklistId } as any });
+      if (checklist) {
+        const remainingInterns = await manager.count(InternChecklist, { where: { checklist: { id: checklistId } } as any });
+        if (remainingInterns === 0) {
+          await manager.delete(ChecklistItem, { checklist: { id: checklistId } } as any);
+          await manager.delete(Checklist, { id: checklistId } as any);
         }
-
-        const assignedInternId = item.internChecklist?.intern?.id;
-        if (!assignedInternId || assignedInternId !== internId) {
-            throw new ForbiddenException('Access Denied: You cannot update this checklist item.');
-        }
-
-        item.isCompleted = isCompleted;
-        item.completedAt = isCompleted ? new Date() : null;
-
-        const updatedItem = await queryRunner.manager.save(InternChecklistItem, item);
-
-        const parentChecklist = await queryRunner.manager.findOne(InternChecklist, {
-            where: { id: item.internChecklist.id },
-            relations: ['items'],
-        });
-
-        if (parentChecklist && parentChecklist.items) {
-            const allItemsCompleted = parentChecklist.items.every(i => i.isCompleted);
-            if (parentChecklist.isComplete !== allItemsCompleted) {
-                parentChecklist.isComplete = allItemsCompleted;
-                await queryRunner.manager.save(InternChecklist, parentChecklist);
-            }
-        }
-
-        await queryRunner.commitTransaction();
-        return updatedItem;
-
-    } catch (error) {
-        await queryRunner.rollbackTransaction();
-        console.error("Checklist Item Status Update Failed:", error);
-        if (error instanceof NotFoundException || error instanceof ForbiddenException) {
-            throw error;
-        }
-        throw new InternalServerErrorException('Failed to update checklist item status due to a transaction error.');
-    } finally {
-        await queryRunner.release();
-    }
-  }
-
-  async assignChecklist(intern: User, template: ChecklistTemplate): Promise<InternChecklist> {
-    if (!intern || !template) {
-        throw new BadRequestException('Intern and ChecklistTemplate are required for assignment.');
-    }
-
-    return await this.entityManager.transaction(async transactionalEntityManager => {
-        const newChecklist = transactionalEntityManager.create(InternChecklist, {
-            intern: intern,
-            template: template,
-        });
-        const savedChecklist = await transactionalEntityManager.save(newChecklist);
-
-        const templateItems = template.items || [];
-        const itemsToCreate = templateItems.map((templateItem) =>
-            transactionalEntityManager.create(InternChecklistItem, {
-                title: templateItem.title,
-                description: templateItem.description || undefined,
-                isCompleted: false,
-                internChecklist: savedChecklist,
-            })
-        );
-        await transactionalEntityManager.save(itemsToCreate);
-
-        console.log(`[ChecklistsService] Assigned checklist ${savedChecklist.id} to intern ${intern.id}.`);
-        return savedChecklist;
+      }
     });
   }
 }

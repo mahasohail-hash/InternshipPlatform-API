@@ -1,28 +1,40 @@
-import { Entity, Column, PrimaryGeneratedColumn, OneToMany } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  OneToMany,
+  Unique,
+  CreateDateColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 import { ChecklistTemplateItem } from './checklist-template-item.entity';
 import { Checklist } from './checklist.entity';
 import { InternChecklist } from './intern-checklist.entity';
 
 @Entity('checklist_templates')
+@Unique(['name'])
 export class ChecklistTemplate {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ unique: true,  nullable: true  })
-  name!: string; 
+  @Column({ nullable: false })
+  name!: string;
 
-  @Column({ nullable: true })
-  description!: string;
+  @Column({ type: 'text', nullable: true })
+  description?: string | null;
 
-  @Column({ nullable: true })
-  title!: string;
-
-  @OneToMany(() => ChecklistTemplateItem, (item: { template: any; }) => item.template, { cascade: true })
+  // Template items (eagerly loaded, cascaded on insert/update)
+  @OneToMany(() => ChecklistTemplateItem, item => item.template, { cascade: true, eager: true })
   items!: ChecklistTemplateItem[];
 
-  @OneToMany(() => Checklist, (checklist: { template: any; }) => checklist.template)
+  // Real checklists created from this template
+  @OneToMany(() => Checklist, checklist => checklist.template)
   checklists!: Checklist[];
 
-  @OneToMany(() => InternChecklist, (ic: { template: any; }) => ic.template)
-  checklistInstances!: InternChecklist[];
+  // Links to intern-checklist assignments derived from this template
+  @OneToMany(() => InternChecklist, ic => ic.template)
+  internChecklists!: InternChecklist[];
+
+  @CreateDateColumn() createdAt!: Date;
+  @UpdateDateColumn() updatedAt!: Date;
 }

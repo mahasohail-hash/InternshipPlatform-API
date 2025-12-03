@@ -3,31 +3,29 @@ import {
   IsNotEmpty,
   IsOptional,
   IsArray,
-  ValidateNested, // Must be imported
+  ValidateNested,
   IsDateString,
 } from 'class-validator';
-import { Type } from 'class-transformer'; // Must be imported
-import { CreateTaskDto } from './create-task.dto'; // Import the corrected Task DTO
+import { Type } from 'class-transformer';
+import { CreateTaskDto } from './create-task.dto';
 
 export class CreateMilestoneDto {
   @IsString()
   @IsNotEmpty()
   title!: string;
 
-  @IsDateString({}, { message: 'Milestone due date must be a valid ISO 8601 date string.' })
   @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsDateString({}, { message: 'Milestone due date must be a valid ISO 8601 date string.' })
   dueDate?: string;
 
-
-
-
-  // --- ENSURE THIS IS CORRECT ---
-  // Validate the nested array of tasks
+  // Optional nested tasks array
+  @IsOptional()
   @IsArray()
-    @IsOptional()
-    @ValidateNested({ each: true })
-    @Type(() => CreateTaskDto)
-    tasks?: CreateTaskDto[];
-  
-  
+  @ValidateNested({ each: true })
+  @Type(() => CreateTaskDto)
+  tasks?: CreateTaskDto[];
 }

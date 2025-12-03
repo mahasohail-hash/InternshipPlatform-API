@@ -40,7 +40,6 @@ import { InternChecklist } from './checklists/entities/intern-checklist.entity';
 import { InternChecklistItem } from './checklists/entities/intern-checklist-item.entity';
 import { ChecklistTemplate } from './checklists/entities/checklist-template.entity';
 import { ChecklistTemplateItem } from './checklists/entities/checklist-template-item.entity';
-import { Session } from './session/session.entity';
 import { GitHubMetrics } from './github/entities/github-metrics.entity';
 import { NlpSummary } from './analytics/entities/nlp-summary.entity';
 import { Checklist } from './checklists/entities/checklist.entity';
@@ -50,7 +49,7 @@ import { AppController } from './app.controller';
 import { NlpController } from './nlp/nlp.controller';
 import { TimeseriesController } from './timeseries/timeseries.controller';
 import { InsightsController } from './insights/insights.controller';
-import { AuthController } from './controller/auth.controller'; // CRITICAL: Import AuthController
+import { AuthController } from './auth/auth.controller'; // CRITICAL: Import AuthController
 import { UsersController } from './users/users.controller'; // CRITICAL: Import UsersController
 import { ProjectsController } from './projects/projects.controller'; // CRITICAL: Import ProjectsController
 import { MilestonesController } from './milestones/milestones.controller'; // CRITICAL: Import MilestonesController
@@ -64,26 +63,27 @@ import * as Joi from 'joi';
 
 import { AppService } from './app.service';
 import { UserRole } from './common/enums/user-role.enum';
-import { CommitEntity } from './entities/commit.entity';
-import { RepoEntity } from './entities/repo.entity';
-import { Intern } from './entities/intern.entity';
+import { Commit } from './commit/entities/commit.entity';
+import { Intern } from './interns/entities/intern.entity';
 import { InternController } from './interns/intern.controller';
+import { Repo } from './repo/entities/repo.entity';
 import { InternService } from './interns/intern.service';
-
+import { InternModule } from './interns/intern.module';
+import { MailerModule } from './mailer/mailer.module';
 const ENTITIES = [
   User,
   Project,
   Milestone,
   Task,
-  CommitEntity,
-  RepoEntity,
+  Commit,
+  Repo,
   Intern,
   Evaluation,
   InternChecklist,
   InternChecklistItem,
   ChecklistTemplate,
   ChecklistTemplateItem,
-  Session,
+ 
   GitHubMetrics,
   NlpSummary,
   Checklist,
@@ -183,7 +183,9 @@ const ENTITIES = [
     NlpModule,
     TimeseriesModule,
     InsightsModule,
+    InternModule,
     PassportModule,
+    MailerModule,
     MilestonesModule, 
     TasksModule,
     TypeOrmModule.forFeature([User,Intern]),
@@ -199,10 +201,12 @@ const ENTITIES = [
     EvaluationsController,
     AnalyticsController,
     GithubController,
+    ChecklistsController,
     ReportsController,
     NlpController,
     InternController,
     InsightsController,
+    InternController,
     TimeseriesController
   ],
   providers: [
@@ -212,6 +216,7 @@ const ENTITIES = [
     // 2. CRITICAL FIX: Register JwtAuthGuard as global guard FIRST (must run before RolesGuard)
     {
       provide: APP_GUARD,
+      
       useFactory: (reflector: Reflector) => new JwtAuthGuard(reflector),
       inject: [Reflector],
     },

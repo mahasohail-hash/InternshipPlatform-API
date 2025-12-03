@@ -1,75 +1,91 @@
+// src/checklists/checklists.controller.ts
 import {
-  Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, NotFoundException, BadRequestException, ParseUUIDPipe, HttpCode, HttpStatus, ForbiddenException
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Param,
+  Body,
+  Query,
+  ParseUUIDPipe,
+  UsePipes,
+  ValidationPipe,
+  Req,
+  Delete,
 } from '@nestjs/common';
-import { ChecklistsService } from "./checklists.service"; // CRITICAL FIX: Standard import
+import { ChecklistsService } from './checklists.service';
 import { CreateChecklistTemplateDto } from './dto/create-checklist-template.dto';
 import { UpdateChecklistTemplateDto } from './dto/update-checklist-template.dto';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { UserRole } from "../common/enums/user-role.enum"; // CRITICAL FIX: Standard import
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { CurrentUser } from "../auth/decorators/current-user.decorator"; // CRITICAL FIX: Standard import
-import { JwtPayload } from '../auth/jwt-payload.interface';
-import { Public } from '@/auth/decorators/public.decorator';
+import { AssignMultipleDto } from './dto/assign-multiple.dto';
+import { UpdateChecklistItemStatusDto } from './dto/update-checklist-item-status.dto';
+import { AssignChecklistsDto } from './dto/assign-checklist.dto';
 
-interface AuthenticatedUserPayload extends JwtPayload {
-    id: string;
-    role: UserRole;
-}
-
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('checklists')
 export class ChecklistsController {
-  constructor(private readonly checklistsService: ChecklistsService) {}
+  constructor(private readonly svc: ChecklistsService) {}
 
-  @Post('templates')
-  @Roles(UserRole.HR)
-  @HttpCode(HttpStatus.CREATED)
-  createTemplate(@Body() createChecklistTemplateDto: CreateChecklistTemplateDto) {
-    return this.checklistsService.createTemplate(createChecklistTemplateDto);
+  /** ---------------- Templates ---------------- */
+  @Get('templates')
+  getTemplates() {
+    return this.svc.findAllTemplates();
   }
 
-  @Get('templates')
-  @Roles(UserRole.HR)
-  findAllTemplates() {
-    return this.checklistsService.findAllTemplates();
+  @Post('templates')
+  @UsePipes(new ValidationPipe({ whitelist: true }))
+  createTemplate(@Body() dto: CreateChecklistTemplateDto) {
+    return this.svc.createTemplate(dto);
+  }
+
+  @Get('templates/:id')
+  getTemplate(@Param('id', ParseUUIDPipe) id: string) {
+    return this.svc.findTemplateById(id);
   }
 
   @Patch('templates/:id')
-  @Roles(UserRole.HR)
-  updateTemplate(@Param('id', ParseUUIDPipe) id: string, @Body() updateDto: UpdateChecklistTemplateDto) {
-    return this.checklistsService.updateTemplate(id, updateDto);
+  @UsePipes(new ValidationPipe({ whitelist: true }))
+  updateTemplate(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateChecklistTemplateDto) {
+    return this.svc.updateTemplate(id, dto);
   }
 
   @Delete('templates/:id')
-  @Roles(UserRole.HR)
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteTemplate(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    await this.checklistsService.deleteTemplate(id);
+  deleteTemplate(@Param('id', ParseUUIDPipe) id: string, @Query('force') force?: string) {
+    return this.svc.deleteTemplate(id, { force: force === 'true' });
   }
 
-  // Other routes...
-
- @Get('intern/:internId') // This is the route your frontend is expecting: /api/checklists/intern/:internId
-  @Public() // It was temporarily public for debugging, keep it for now.
-  // @Roles(UserRole.INTERN, UserRole.MENTOR, UserRole.HR) // Uncomment and remove @Public() once confirmed working.
-  async getInternChecklist(@Param('internId', ParseUUIDPipe) internId: string, @CurrentUser() user?: AuthenticatedUserPayload) {
-    if (user && user.role === UserRole.INTERN && user.id !== internId) { // Check user only if present
-        throw new ForbiddenException('You can only view your own checklist.');
-    }
-    return this.checklistsService.findChecklistByInternId(internId);
+  /** ---------------- Assign Templates ---------------- */
+  @Post('templates/assign')
+  @UsePipes(new ValidationPipe({ whitelist: true }))
+  assignMultiple(@Body() dto: AssignMultipleDto) {
+    return this.svc.assignTemplatesToInterns(dto.templateIds, dto.internIds);
   }
- @Patch('items/:itemId')
-  @Roles(UserRole.INTERN)
-  @HttpCode(HttpStatus.OK)
-  async updateInternChecklistItemStatus(
+
+  /** ---------------- Intern-specific ---------------- */
+  @Get('intern/:internId')
+  getForIntern(@Param('internId', ParseUUIDPipe) internId: string) {
+    return this.svc.getChecklistsForIntern(internId);
+  }
+
+  /** ---------------- Checklist Items ---------------- */
+  @Patch('items/:itemId/status')
+  @UsePipes(new ValidationPipe({ whitelist: true }))
+  updateItemStatus(
     @Param('itemId', ParseUUIDPipe) itemId: string,
-    @Body('isCompleted') isCompleted: boolean,
-    @CurrentUser() user: AuthenticatedUserPayload
+    @Body() dto: UpdateChecklistItemStatusDto,
+    @Req() req: any,
   ) {
-    if (typeof isCompleted !== 'boolean') {
-        throw new BadRequestException('The request body must contain a boolean field: isCompleted.');
-    }
-    return this.checklistsService.updateItemStatus(itemId, isCompleted, user.id);
+    // resolve actor intern id from request (e.g., via auth guard)
+    const actorInternId = req?.user?.internId ?? req?.user?.id;
+    return this.svc.updateItemStatus(itemId, dto.isCompleted, actorInternId);
+  }
+
+  /** ---------------- All Checklists ---------------- */
+  @Get()
+  listAll() {
+    return this.svc.findAllChecklists();
+  }
+
+  @Get(':id')
+  getChecklist(@Param('id', ParseUUIDPipe) id: string) {
+    return this.svc.findChecklistById(id);
   }
 }

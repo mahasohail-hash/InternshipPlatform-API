@@ -21,7 +21,7 @@ export class ReportsService {
   ) {}
 
   async generateInternFinalPacketPdf(internId: string, requesterId: string, requesterRole: UserRole): Promise<Buffer> {
-    const intern = await this.usersService.findOne(internId);
+    const intern = await this.usersService.findOneById(internId);
     if (!intern || intern.role !== UserRole.INTERN) {
       throw new NotFoundException(`Intern with ID "${internId}" not found or is not an INTERN.`);
     }

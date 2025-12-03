@@ -1,27 +1,54 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  JoinColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 import { Checklist } from './checklist.entity';
+import { ChecklistTemplate } from './checklist-template.entity';
+import { InternChecklist } from './intern-checklist.entity';
 
-@Entity()
+@Entity('checklist_items')
 export class ChecklistItem {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column()
+  @Column({ type: 'varchar', nullable: false })
+  title!: string;
+
+  @Column({ type: 'text', nullable: true })
+  description?: string | null;
+
+  @Column({ type: 'uuid' })
   checklistId!: string;
 
-  @ManyToOne(() => Checklist, (checklist) => checklist.items)
+  @Column({ type: 'uuid', nullable: true })
+  templateId?: string | null;
+
+  // Many items belong to a single checklist
+  @ManyToOne(() => Checklist, checklist => checklist.items, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'checklistId' })
   checklist!: Checklist;
 
-  @Column()
-  title!: string;
+  // Optional link to template item
+  @ManyToOne(() => ChecklistTemplate, template => template.items, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'templateId' })
+  template?: ChecklistTemplate;
+
+  // Link to InternChecklist to track completion per intern (optional)
+  @ManyToOne(() => InternChecklist, ic => ic.items, { nullable: true, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'internChecklistId' })
+  internChecklist?: InternChecklist;
 
   @Column({ default: false })
   isCompleted!: boolean;
 
-  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
-  createdAt!: Date;
+  @Column({ type: 'text', nullable: true })
+  text?: string | null;
 
-  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
-  updatedAt!: Date;
+  @CreateDateColumn() createdAt!: Date;
+  @UpdateDateColumn() updatedAt!: Date;
 }

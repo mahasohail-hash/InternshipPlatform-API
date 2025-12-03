@@ -17,7 +17,7 @@ import { GithubModule } from '../github/github.module';
 import { EvaluationsModule } from '../evaluations/evaluations.module';
 import { UsersModule } from '../users/users.module'; // CRITICAL FIX: Import UsersModule
 import { GithubService } from '../github/github.service';
-import { Intern } from '@/entities/intern.entity';
+import { Intern } from '@/interns/entities/intern.entity';
 @Module({
   imports: [
     TypeOrmModule.forFeature([

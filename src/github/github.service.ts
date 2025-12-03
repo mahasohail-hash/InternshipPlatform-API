@@ -4,13 +4,18 @@ import { Repository } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { Octokit } from '@octokit/rest';
-import { Intern } from '../entities/intern.entity'; // Adjust path as necessary
 import { GitHubMetrics } from './entities/github-metrics.entity';
-
+import { Intern } from '@/interns/entities/intern.entity';
 const COMMIT_DETAIL_LIMIT = 20;
 
 @Injectable()
 export class GithubService {
+  getGithubStatus(internId: string) {
+    throw new Error('Method not implemented.');
+  }
+  updateGithubUsername(internId: string, githubUsername: string) {
+    throw new Error('Method not implemented.');
+  }
   private readonly logger = new Logger(GithubService.name);
   private readonly octokit: Octokit;
   private readonly token?: string;

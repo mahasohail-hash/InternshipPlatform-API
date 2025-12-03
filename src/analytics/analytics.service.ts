@@ -19,6 +19,9 @@ const its = nlp.its;
 
 @Injectable()
 export class AnalyticsService {
+  getDashboardSummary() {
+    throw new Error('Method not implemented.');
+  }
   metricsRepo: any;
   octokit: any;
   logger: any;
